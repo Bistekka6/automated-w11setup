@@ -10,9 +10,6 @@ e installa applicazioni standard tramite winget e programmi di installazione loc
 Assicurati che questo script venga eseguito da un'unità portatile, da una condivisione di rete o direttamente via GitHub link.
 #>
 
-# Configurazione GitHub (Modifica con i tuoi dati se carichi lo script online)
-$GitHubRepoUrl = "https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main"
-
 param(
     [bool]$ConfigureSystem = $false,
     [bool]$RunDebloat = $false,
@@ -23,6 +20,9 @@ param(
     [bool]$CheckBitlocker = $false,
     [bool]$Unattended = $false
 )
+
+# Configurazione GitHub (Modifica con i tuoi dati se carichi lo script online)
+$GitHubRepoUrl = "https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main"
 
 $ErrorActionPreference = "Stop"
 
