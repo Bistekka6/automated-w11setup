@@ -19,10 +19,10 @@ Script di configurazione post-installazione per PC Windows 11 e Windows 10, prog
 Per avviare lo script su un nuovo PC, apri PowerShell come Amministratore e incolla il seguente comando:
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; $script = (Invoke-RestMethod -Uri "https://tinyurl.com/w11tecnodata"); $script | Invoke-Expression
+iwr https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps1 -useb | iex
 ```
 
-*(Link corto: `https://tinyurl.com/w11tecnodata`)*
+Questo comando scarica ed esegue l'ultima versione dello script direttamente dal repository.
 
 ## Manutenzione
 Per aggiungere nuovi file `.msi` o `.exe`, inseriscili nella cartella `installers/` e aggiorna `args.json` se necessario.
