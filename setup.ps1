@@ -12,20 +12,15 @@ param(
 <#
 .SYNOPSIS
 Script di configurazione post-installazione per PC Windows.
-
-.DESCRIPTION
-Questo script configura le impostazioni di risparmio energia, il firewall, ottimizza Windows 11 (debloat) 
-e installa applicazioni standard tramite winget e programmi di installazione locali.
-
-.NOTES
-Assicurati che questo script venga eseguito da un'unità portatile, da una condivisione di rete o direttamente via GitHub link.
 #>
 
-# Configurazione GitHub (Modifica con i tuoi dati se carichi lo script online)
+# Configurazione GitHub
 $GitHubRepoUrl = "https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main"
 
-$ErrorActionPreference = "Stop"
+# Configurazione Protocolli di Sicurezza (TLS 1.2)
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
+$ErrorActionPreference = "Stop"
 $SummaryLog = @()
 
 try {
@@ -33,13 +28,22 @@ try {
     if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Warning "Lo script non è in esecuzione come Amministratore. Tentativo di elevazione dei privilegi in corso..."
         
+        # Definiamo la sorgente remota per l'elevazione
+        $remoteUrl = "https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps1"
+
         if ($PSCommandPath) {
             # Esecuzione locale
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
         } else {
-            # Esecuzione remota (via iex)
-            $remoteCmd = "irm $GitHubRepoUrl/setup.ps1 | iex"
-            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$remoteCmd`"" -Verb RunAs
+            # Esecuzione remota (via iex): scarichiamo un file temporaneo per elevare reliably
+            $tempScript = Join-Path $env:TEMP "setup_elevated.ps1"
+            try {
+                Invoke-WebRequest -Uri $remoteUrl -OutFile $tempScript -UseBasicParsing -ErrorAction Stop
+                Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempScript`"" -Verb RunAs
+            } catch {
+                Write-Error "Impossibile scaricare lo script per l'elevazione: $($_.Exception.Message)"
+                Read-Host "Premi Invio per uscire..."
+            }
         }
         exit
     }
