@@ -32,7 +32,15 @@ try {
     # --- 1. Verifica Amministratore ---
     if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Warning "Lo script non è in esecuzione come Amministratore. Tentativo di elevazione dei privilegi in corso..."
-        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        
+        if ($PSCommandPath) {
+            # Esecuzione locale
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        } else {
+            # Esecuzione remota (via iex)
+            $remoteCmd = "irm $GitHubRepoUrl/setup.ps1 | iex"
+            Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$remoteCmd`"" -Verb RunAs
+        }
         exit
     }
 
