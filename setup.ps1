@@ -1,3 +1,14 @@
+param(
+    [bool]$ConfigureSystem = $false,
+    [bool]$RunDebloat = $false,
+    [bool]$InstallWingetApps = $false,
+    [bool]$InstallLocalApps = $false,
+    [bool]$ConfigureTaskbar = $false,
+    [bool]$RunWindowsUpdate = $false,
+    [bool]$CheckBitlocker = $false,
+    [bool]$Unattended = $false
+)
+
 <#
 .SYNOPSIS
 Script di configurazione post-installazione per PC Windows.
@@ -9,17 +20,6 @@ e installa applicazioni standard tramite winget e programmi di installazione loc
 .NOTES
 Assicurati che questo script venga eseguito da un'unità portatile, da una condivisione di rete o direttamente via GitHub link.
 #>
-
-param(
-    [bool]$ConfigureSystem = $false,
-    [bool]$RunDebloat = $false,
-    [bool]$InstallWingetApps = $false,
-    [bool]$InstallLocalApps = $false,
-    [bool]$ConfigureTaskbar = $false,
-    [bool]$RunWindowsUpdate = $false,
-    [bool]$CheckBitlocker = $false,
-    [bool]$Unattended = $false
-)
 
 # Configurazione GitHub (Modifica con i tuoi dati se carichi lo script online)
 $GitHubRepoUrl = "https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main"
