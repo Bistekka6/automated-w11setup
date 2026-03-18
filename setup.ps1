@@ -311,13 +311,13 @@ public class Wallpaper {
             foreach ($exe in $executables) {
                 Write-Host " - Installazione EXE: $($exe.Name) in corso..."
                 
-                # Gestione specifica degli argomenti tramite file di configurazione
-                if ($customArgs.ContainsKey($exe.Name)) {
-                    $exeArgs = $customArgs[$exe.Name]
-                }
-                else {
-                    # Argomenti invisibili comuni per EXE generici
-                    $exeArgs = "/S /quiet /qn"
+                # Cerca argomenti corrispondenti (supporta wildcard nei nomi file in args.json)
+                $exeArgs = "/S /quiet /qn" # Default
+                foreach ($pattern in $customArgs.Keys) {
+                    if ($exe.Name -like $pattern) {
+                        $exeArgs = $customArgs[$pattern]
+                        break
+                    }
                 }
 
                 Start-Process -FilePath $exe.FullName -ArgumentList $exeArgs -Wait -NoNewWindow
