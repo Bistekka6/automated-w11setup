@@ -19,7 +19,7 @@ Script di configurazione post-installazione per PC Windows 11 e Windows 10, prog
 Per avviare lo script su un nuovo PC, apri PowerShell come Amministratore e incolla il seguente comando:
 
 ```powershell
-iwr https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps1 -useb | iex
+irm https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps1 | iex
 ```
 
 Questo comando scarica ed esegue l'ultima versione dello script direttamente dal repository.
