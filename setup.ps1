@@ -35,13 +35,15 @@ try {
         if ($PSCommandPath) {
             # Esecuzione locale
             Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-        } else {
+        }
+        else {
             # Esecuzione remota (via iex): scarichiamo un file temporaneo per elevare reliably
             $tempScript = Join-Path $env:TEMP "setup_elevated.ps1"
             try {
                 Invoke-WebRequest -Uri $remoteUrl -OutFile $tempScript -UseBasicParsing -ErrorAction Stop
                 Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempScript`"" -Verb RunAs
-            } catch {
+            }
+            catch {
                 Write-Error "Impossibile scaricare lo script per l'elevazione: $($_.Exception.Message)"
                 Read-Host "Premi Invio per uscire..."
             }
@@ -52,7 +54,8 @@ try {
     # Gestione del percorso dello script (supporta esecuzione remota via Invoke-Expression)
     if ($PSCommandPath) {
         $ScriptDir = Split-Path -Parent $PSCommandPath
-    } else {
+    }
+    else {
         $ScriptDir = Join-Path $env:TEMP "WindowsSetup"
         if (-not (Test-Path $ScriptDir)) { New-Item -ItemType Directory -Path $ScriptDir | Out-Null }
         Write-Host " - Esecuzione remota rilevata. Cartella di lavoro: $ScriptDir" -ForegroundColor Gray
@@ -175,7 +178,8 @@ public class Wallpaper {
                 [Wallpaper]::Set($LocalBackgroundPath)
             }
             $SummaryLog += "[-] Impostazioni di Sistema e Sfondo configurati"
-        } catch {
+        }
+        catch {
             Write-Warning " - Errore durante la configurazione di sistema: $($_.Exception.Message)"
             $SummaryLog += "[!] Errore configurazione sistema (parziale)"
         }
@@ -200,7 +204,8 @@ public class Wallpaper {
             & $debloatScriptPath -Silent -RunDefaults
             Set-Location -Path $currentLoc
             $SummaryLog += "[-] Win11Debloat eseguito con successo"
-        } catch {
+        }
+        catch {
             Write-Warning " - Errore Win11Debloat: $($_.Exception.Message)"
             if ($currentLoc) { Set-Location -Path $currentLoc }
         }
@@ -214,7 +219,8 @@ public class Wallpaper {
             foreach ($app in $mc) { $app.Uninstall() | Out-Null }
             $SummaryLog += "[-] McAfee rimosso"
         }
-    } catch { Write-Warning " - Errore rimozione McAfee" }
+    }
+    catch { Write-Warning " - Errore rimozione McAfee" }
 
     # --- 4. App di Winget ---
     if ($InstallWingetApps) {
@@ -245,18 +251,21 @@ public class Wallpaper {
                 $existing = winget list --id $($app.id) --exact -e -q 2>$null
                 if ($existing) {
                     Write-Host " - $($app.name) già installato. Verifica aggiornamenti..." -ForegroundColor Gray
-                } else {
+                }
+                else {
                     Write-Host " - Installazione di $($app.name)..." -ForegroundColor Gray
                 }
                 Start-Process winget -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements" -Wait -NoNewWindow
             }
             $SummaryLog += "[-] Applicazioni Winget verificate"
-        } catch { Write-Warning " - Errore Winget" }
+        }
+        catch { Write-Warning " - Errore Winget" }
     }
 
     # --- 5. App Locali e Speciali ---
     if ($InstallLocalApps) {
-        Write-Host "`n[4/4] Installazione applicazioni locali/speciali in corso..." -ForegroundColor Cyan
+        Write-Host "`n[4/4] Installazione applicazioni locali/speciali (TEMPORANEAMENTE DISABILITATA)" -ForegroundColor Yellow
+        <#
         $installersDir = Join-Path $ScriptDir "installers"
         $configPath = Join-Path $installersDir "args.json"
         
@@ -269,7 +278,8 @@ public class Wallpaper {
             try {
                 Write-Host " - Download args.json da GitHub..."
                 Invoke-WebRequest -Uri "$GitHubRepoUrl/installers/args.json" -OutFile $configPath -UseBasicParsing
-            } catch { }
+            }
+            catch { }
         }
 
         $customArgs = @{}
@@ -314,6 +324,7 @@ public class Wallpaper {
         else {
             Write-Host " - Nessuna directory 'installers' trovata. Salto le app locali."
         }
+        #>
     }
 
     # --- 6. Taskbar ---
@@ -342,7 +353,8 @@ public class Wallpaper {
             Stop-Process -Name explorer -Force
             Write-Host " - Taskbar configurata (si applicherà completamente al prossimo login)"
             $SummaryLog += "[-] Taskbar configurata (Esplora Risorse, Chrome)"
-        } catch {
+        }
+        catch {
             Write-Warning " - Impossibile configurare la Taskbar: $($_.Exception.Message)"
             $SummaryLog += "[!] Errore Taskbar (saltata)"
         }
