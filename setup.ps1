@@ -230,7 +230,8 @@ public class Wallpaper {
             $apps = @(
                 @{ id = "Google.Chrome"; name = "Chrome" },
                 @{ id = "Microsoft.Office"; name = "Office" },
-                @{ id = "Adobe.Acrobat.Reader.64-bit"; name = "Acrobat Reader" }
+                @{ id = "Adobe.Acrobat.Reader.64-bit"; name = "Acrobat Reader" },
+                @{ id = "WatchGuard.MobileVPNWithSSLClient"; name = "WatchGuard Mobile VPN" }
             )
 
             $manufacturer = (Get-WmiObject Win32_ComputerSystem).Manufacturer
@@ -262,20 +263,6 @@ public class Wallpaper {
         # Crea cartella installers se mancante (caso esecuzione remota)
         if (-not (Test-Path $installersDir)) { New-Item -ItemType Directory -Path $installersDir | Out-Null }
 
-        # --- Download WatchGuard VPN (Sempre da Internet) ---
-        try {
-            Write-Host " - Download WatchGuard Mobile VPN with SSL in corso..."
-            $wgUrl = "https://cdn.watchguard.com/SoftwareCenter/Files/MUVPN_SSL/2026_1/WG-MVPN-SSL_2026_1.exe"
-            $wgPath = Join-Path $installersDir "WG-MVPN-SSL_2026_1.exe"
-            if (-not (Test-Path $wgPath)) {
-                Invoke-WebRequest -Uri $wgUrl -OutFile $wgPath -UseBasicParsing
-            }
-            Write-Host " - Installazione WatchGuard in corso..."
-            Start-Process -FilePath $wgPath -ArgumentList "/S /v/qn" -Wait -NoNewWindow
-            $SummaryLog += "[-] WatchGuard VPN installato"
-        } catch {
-            Write-Warning " - Impossibile installare WatchGuard: $($_.Exception.Message)"
-        }
 
         # Caricamento argomenti da args.json (anche remoto)
         if (-not (Test-Path $configPath) -and $GitHubRepoUrl -ne "https://raw.githubusercontent.com/YourUsername/YourRepo/main") {
