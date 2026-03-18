@@ -49,8 +49,9 @@ try {
     }
 
     # Gestione del percorso dello script (supporta esecuzione remota via Invoke-Expression)
-    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue
-    if (-not $ScriptDir) {
+    if ($PSCommandPath) {
+        $ScriptDir = Split-Path -Parent $PSCommandPath
+    } else {
         $ScriptDir = Join-Path $env:TEMP "WindowsSetup"
         if (-not (Test-Path $ScriptDir)) { New-Item -ItemType Directory -Path $ScriptDir | Out-Null }
         Write-Host " - Esecuzione remota rilevata. Cartella di lavoro: $ScriptDir" -ForegroundColor Gray
