@@ -16,6 +16,7 @@ Script di configurazione post-installazione per PC Windows.
 
 # Configurazione GitHub
 $GitHubRepoUrl = "https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main"
+$RemoteBackgroundUrl = "$GitHubRepoUrl/background/background.png"
 
 # Configurazione Protocolli di Sicurezza (TLS 1.2)
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
@@ -114,211 +115,142 @@ try {
         Start-Sleep -Seconds 3
     }
 
-    # --- 2. Impostazioni di Sistema ---
+    # --- 2. Configurazione Impostazioni di Sistema ---
     if ($ConfigureSystem) {
-        Write-Host "`n[1/4] Configurazione Impostazioni di Sistema in corso..." -ForegroundColor Cyan
-        
-        # Profilo di Risparmio Energia: Assicurarsi che Bilanciato sia attivo (GUID: 381b4222-f694-41f0-9685-ff5bb260df2e)
         try {
+            Write-Host "`n[1/4] Configurazione Impostazioni di Sistema..." -ForegroundColor Cyan
+            
+            # Profilo di Risparmio Energia: Bilanciato
             powercfg /SETACTIVE 381b4222-f694-41f0-9685-ff5bb260df2e
-            Write-Host " - Profilo di risparmio energia impostato su Bilanciato"
-        }
-        catch {
-            Write-Warning " - Impossibile impostare il profilo di risparmio energia Bilanciato."
-        }
-        
-        # Disattiva Sospensione/Standby (0 significa mai)
-        powercfg /x -standby-timeout-ac 0
-        powercfg /x -standby-timeout-dc 0
-        Write-Host " - Sospensione/Standby disabilitati"
-        
-        # Spegni lo schermo dopo 15 minuti
-        powercfg /x -monitor-timeout-ac 15
-        powercfg /x -monitor-timeout-dc 15
-        Write-Host " - Timeout dello schermo impostato a 15 minuti"
-        
-        # Richiedi l'accesso al risveglio (blocco console)
-        powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_NONE CONSOLELOCK 1
-        powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_NONE CONSOLELOCK 1
-        
-        # Consenti Ping (ICMPv4-In)
-        Write-Host " - Abilitazione ICMPv4 (Ping) nel Firewall in corso..."
-        $pingRule = Get-NetFirewallRule -DisplayName "Allow ICMPv4-In" -ErrorAction SilentlyContinue
-        if (-not $pingRule) {
-            New-NetFirewallRule -DisplayName "Allow ICMPv4-In" -Protocol ICMPv4 -IcmpType 8 -Enabled True -Profile Any -Action Allow | Out-Null
-        }
-        else {
-            Set-NetFirewallRule -DisplayName "Allow ICMPv4-In" -Enabled True | Out-Null
-        }
-        
-        # --- Informazioni OEM ---
-        Write-Host " - Impostazione informazioni OEM (Tecnodata Trentina Srl)..."
-        try {
-            $oemKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation"
-            if (-not (Test-Path $oemKey)) {
-                New-Item -Path $oemKey -Force | Out-Null
+            powercfg /x -standby-timeout-ac 0
+            powercfg /x -standby-timeout-dc 0
+            powercfg /x -monitor-timeout-ac 15
+            powercfg /x -monitor-timeout-dc 15
+            Write-Host " - Risparmio energia e timeout configurati." -ForegroundColor Gray
+            
+            # Consenti Ping (ICMPv4-In)
+            if (-not (Get-NetFirewallRule -DisplayName "Allow ICMPv4-In" -ErrorAction SilentlyContinue)) {
+                New-NetFirewallRule -DisplayName "Allow ICMPv4-In" -Protocol ICMPv4 -IcmpType 8 -Enabled True -Profile Any -Action Allow | Out-Null
             }
+            Write-Host " - Firewall (Ping) configurato." -ForegroundColor Gray
+
+            # Informazioni OEM (Tecnodata Trentina Srl)
+            $oemKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation"
+            if (-not (Test-Path $oemKey)) { New-Item -Path $oemKey -Force | Out-Null }
             Set-ItemProperty -Path $oemKey -Name "Manufacturer" -Value "Tecnodata Trentina Srl" -Type String -Force
             Set-ItemProperty -Path $oemKey -Name "SupportURL" -Value "https://support.tecnodata.it/" -Type String -Force
             Set-ItemProperty -Path $oemKey -Name "SupportPhone" -Value "04611780400" -Type String -Force
-            $SummaryLog += "[-] Impostazioni di Sistema (Energia/Ping/OEM) configurate"
+            Write-Host " - Informazioni OEM impostate." -ForegroundColor Gray
+
+            # --- Sfondo Aziendale ---
+            $LocalBackgroundDir = Join-Path $ScriptDir "background"
+            if (-not (Test-Path $LocalBackgroundDir)) { New-Item -ItemType Directory -Path $LocalBackgroundDir | Out-Null }
+            $LocalBackgroundPath = Join-Path $LocalBackgroundDir "background.png"
+            
+            if (-not (Test-Path $LocalBackgroundPath)) {
+                if (-not $PSCommandPath) {
+                    Write-Host " - Download dello sfondo aziendale..." -ForegroundColor Gray
+                    Invoke-WebRequest -Uri $RemoteBackgroundUrl -OutFile $LocalBackgroundPath -UseBasicParsing -ErrorAction SilentlyContinue
+                }
+            }
+            
+            if (Test-Path $LocalBackgroundPath) {
+                Write-Host " - Applicazione dello sfondo desktop..." -ForegroundColor Gray
+                $code = @"
+using System;
+using System.Runtime.InteropServices;
+public class Wallpaper {
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+    public const int SPI_SETDESKWALLPAPER = 20;
+    public const int SPIF_UPDATEINIFILE = 0x01;
+    public const int SPIF_SENDWININICHANGE = 0x02;
+    public static void Set(string path) {
+        SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, path, SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE);
+    }
+}
+"@
+                Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+                Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name Wallpaper -Value $LocalBackgroundPath
+                [Wallpaper]::Set($LocalBackgroundPath)
+            }
+            $SummaryLog += "[-] Impostazioni di Sistema e Sfondo configurati"
         } catch {
-            Write-Warning " - Impossibile configurare le informazioni OEM: $($_.Exception.Message)"
-            $SummaryLog += "[!] Errore configurazione OEM (saltata)"
+            Write-Warning " - Errore durante la configurazione di sistema: $($_.Exception.Message)"
+            $SummaryLog += "[!] Errore configurazione sistema (parziale)"
         }
     }
 
     # --- 3. Win11Debloat ---
     if ($RunDebloat) {
-        Write-Host "`n[2/4] Esecuzione di Win11Debloat in corso..." -ForegroundColor Cyan
-        
-        $debloatDir = Join-Path $ScriptDir "Win11Debloat"
-        $debloatScriptPath = Join-Path $debloatDir "Win11Debloat.ps1"
-        $zipPath = Join-Path $ScriptDir "Win11Debloat.zip"
-        
-        if (-not (Test-Path $debloatScriptPath)) {
-            try {
-                Write-Host " - Tentativo di download dell'ultima versione completa di Win11Debloat da GitHub (ZIP) in corso..."
-                $zipUrl = "https://github.com/Raphire/Win11Debloat/archive/refs/heads/master.zip"
-                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
-                
-                Write-Host " - Estrazione dei file in corso..."
-                Expand-Archive -Path $zipPath -DestinationPath $ScriptDir -Force
-                
-                $extractedDir = Join-Path $ScriptDir "Win11Debloat-master"
-                if (Test-Path $extractedDir) {
-                    Rename-Item -Path $extractedDir -NewName "Win11Debloat" -Force
-                }
-                
-                Remove-Item -Path $zipPath -Force
-                
-                # Rimuove il vecchio script isolato, se presente
-                $oldScript = Join-Path $ScriptDir "Win11Debloat.ps1"
-                if (Test-Path $oldScript) { Remove-Item -Path $oldScript -Force }
-                
-                Write-Host " - Win11Debloat scaricato ed estratto con successo."
-            }
-            catch {
-                Write-Host " - Impossibile scaricare Win11Debloat. Controllo della copia offline..." -ForegroundColor Yellow
-            }
-        }
-        
+        Write-Host "`n[2/4] Esecuzione di Win11Debloat..." -ForegroundColor Cyan
         try {
-            if (Test-Path $debloatScriptPath) {
-                Write-Host " - Modifica di Apps.json per mantenere le app Microsoft..."
-                $appsJsonPath = Join-Path $debloatDir "Config\Apps.json"
-                if (Test-Path $appsJsonPath) {
-                    $appsConfig = Get-Content $appsJsonPath -Raw | ConvertFrom-Json
-                    foreach ($app in $appsConfig.Apps) {
-                        if ($app.AppId -match '^Microsoft|^Windows|^Xbox|Teams|Cortana') {
-                            $app.SelectedByDefault = $false
-                        }
-                    }
-                    $appsConfig | ConvertTo-Json -Depth 10 | Set-Content $appsJsonPath
-                }
-
-                Write-Host " - Esecuzione di Win11Debloat in modalità silenziosa..."
-                $currentLoc = Get-Location
-                Set-Location -Path $debloatDir
-                
-                # -Silent prevents the "Press Enter to continue" prompt
-                # -RunDefaults runs the default system optimizations
-                & $debloatScriptPath -Silent -RunDefaults
-                
-                Set-Location -Path $currentLoc
-                $SummaryLog += "[-] Win11Debloat eseguito (App non-MS rimosse, Ottimizzazioni attive)"
+            $debloatDir = Join-Path $ScriptDir "Win11Debloat"
+            $debloatScriptPath = Join-Path $debloatDir "Win11Debloat.ps1"
+            if (-not (Test-Path $debloatScriptPath)) {
+                $zipUrl = "https://github.com/Raphire/Win11Debloat/archive/refs/heads/master.zip"
+                $zipPath = Join-Path $ScriptDir "Win11Debloat.zip"
+                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+                Expand-Archive -Path $zipPath -DestinationPath $ScriptDir -Force
+                Rename-Item -Path (Join-Path $ScriptDir "Win11Debloat-master") -NewName "Win11Debloat" -Force
+                Remove-Item -Path $zipPath -Force
             }
-            else {
-                Write-Warning " - Lo script Win11Debloat non è stato trovato. Salto l'operazione."
-            }
+            $currentLoc = Get-Location
+            Set-Location -Path $debloatDir
+            & $debloatScriptPath -Silent -RunDefaults
+            Set-Location -Path $currentLoc
+            $SummaryLog += "[-] Win11Debloat eseguito con successo"
         } catch {
-            Write-Warning " - Errore durante l'esecuzione di Win11Debloat: $($_.Exception.Message)"
-            $SummaryLog += "[!] Win11Debloat fallito (saltato)"
+            Write-Warning " - Errore Win11Debloat: $($_.Exception.Message)"
             if ($currentLoc) { Set-Location -Path $currentLoc }
         }
     }
 
-    # --- McAfee Removal ---
-    Write-Host "`nRimozione predefinita McAfee e WebAdvisor in corso..." -ForegroundColor Cyan
-    $mcafeeApps = @("McAfee*", "*WebAdvisor*")
-    $foundMcAfee = $false
-
-    foreach ($appGlob in $mcafeeApps) {
-        $apps = Get-WmiObject -Class Win32_Product | Where-Object { $_.Name -like $appGlob }
-        if ($apps) {
-            $foundMcAfee = $true
-            foreach ($app in $apps) {
-                Write-Host " - Disinstallazione di $($app.Name)..."
-                $app.Uninstall() | Out-Null
-            }
+    # --- Rimozione McAfee ---
+    Write-Host "`nRimozione McAfee..." -ForegroundColor Cyan
+    try {
+        $mc = Get-WmiObject -Class Win32_Product | Where-Object { $_.Name -like "McAfee*" -or $_.Name -like "*WebAdvisor*" }
+        if ($mc) {
+            foreach ($app in $mc) { $app.Uninstall() | Out-Null }
+            $SummaryLog += "[-] McAfee rimosso"
         }
-    }
-    
-    if ($foundMcAfee) {
-        Write-Host " - McAfee disinstallato con successo."
-        $SummaryLog += "[-] McAfee e WebAdvisor disinstallati"
-    }
-    else {
-        Write-Host " - Nessuna installazione di McAfee trovata."
-    }
+    } catch { Write-Warning " - Errore rimozione McAfee" }
 
     # --- 4. App di Winget ---
     if ($InstallWingetApps) {
-        Write-Host "`nInstallazione applicazioni tramite Winget in corso..." -ForegroundColor Cyan
-        
+        Write-Host "`n[3/4] Installazione Applicazioni Winget..." -ForegroundColor Cyan
         try {
-            # Verifica presenza Winget (necessario su Windows 10)
-            if (-not (Get-Command "winget" -ErrorAction SilentlyContinue)) {
-                Write-Host " - Winget non trovato. Tentativo di installazione in corso..." -ForegroundColor Yellow
-                
+            if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
                 $wingetUrl = "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle"
-                $wingetPath = Join-Path $env:TEMP "winget.msixbundle"
-                
-                Invoke-WebRequest -Uri $wingetUrl -OutFile $wingetPath -UseBasicParsing
-                Add-AppxPackage -Path $wingetPath
-                
-                # Attesa breve per registrazione comando
+                Invoke-WebRequest -Uri $wingetUrl -OutFile "$env:TEMP\winget.msixbundle" -UseBasicParsing
+                Add-AppxPackage -Path "$env:TEMP\winget.msixbundle"
                 Start-Sleep -Seconds 5
-                
-                if (-not (Get-Command "winget" -ErrorAction SilentlyContinue)) {
-                    throw "Installazione Winget fallita. Procedere manualmente."
-                }
-                Write-Host " - Winget installato con successo."
             }
 
             $apps = @(
-                "Google.Chrome",
-                "Microsoft.Office",
-                "Adobe.Acrobat.Reader.64-bit"
+                @{ id = "Google.Chrome"; name = "Chrome" },
+                @{ id = "Microsoft.Office"; name = "Office" },
+                @{ id = "Adobe.Acrobat.Reader.64-bit"; name = "Acrobat Reader" }
             )
-            
-            # Controllo produttore per software specifici
-            $pcInfo = Get-WmiObject -Class Win32_ComputerSystem
-            if ($pcInfo.Manufacturer -match "Dell") {
-                Write-Host " - PC Dell rilevato. Aggiunta software specifico (Dell Command | Update)..."
-                $apps += "Dell.CommandUpdate"
-            }
-            elseif ($pcInfo.Manufacturer -match "Lenovo") {
-                Write-Host " - PC Lenovo rilevato. Aggiunta software specifico (Lenovo System Update e Vantage)..."
-                $apps += "Lenovo.SystemUpdate"
-                $apps += "Lenovo.Vantage"
+
+            $manufacturer = (Get-WmiObject Win32_ComputerSystem).Manufacturer
+            if ($manufacturer -match "Dell") { $apps += @{ id = "Dell.CommandUpdate"; name = "Dell Command Update" } }
+            elseif ($manufacturer -match "Lenovo") { 
+                $apps += @{ id = "Lenovo.SystemUpdate"; name = "Lenovo System Update" }
+                $apps += @{ id = "Lenovo.Vantage"; name = "Lenovo Vantage" }
             }
 
             foreach ($app in $apps) {
-                Write-Host " - Installazione di $app in corso..."
-                try {
-                    # Esegue l'installazione invisibile accettando gli accordi
-                    $installArgs = "install --id $app --accept-package-agreements --accept-source-agreements --silent --force --source winget"
-                    Start-Process -FilePath "winget" -ArgumentList $installArgs -Wait -NoNewWindow
-                } catch {
-                    Write-Warning " - Errore durante l'installazione di ${app}: $($_.Exception.Message)"
+                $existing = winget list --id $($app.id) --exact -e -q 2>$null
+                if ($existing) {
+                    Write-Host " - $($app.name) già installato. Verifica aggiornamenti..." -ForegroundColor Gray
+                } else {
+                    Write-Host " - Installazione di $($app.name)..." -ForegroundColor Gray
                 }
+                Start-Process winget -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements" -Wait -NoNewWindow
             }
-            $SummaryLog += "[-] Eseguita installazione App via Winget"
-        } catch {
-            Write-Warning " - Errore critico in sezione Winget: $($_.Exception.Message)"
-            $SummaryLog += "[!] Winget fallito o non disponibile (saltato)"
-        }
+            $SummaryLog += "[-] Applicazioni Winget verificate"
+        } catch { Write-Warning " - Errore Winget" }
     }
 
     # --- 5. App Locali e Speciali ---
