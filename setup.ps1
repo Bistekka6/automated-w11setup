@@ -257,14 +257,14 @@ public class Wallpaper {
             }
 
             foreach ($app in $apps) {
-                $existing = winget list --id $($app.id) --exact -e -q 2>$null
+                $existing = winget list --id $($app.id) --exact -e -q --source winget 2>$null
                 if ($existing) {
                     Write-Host " - $($app.name) già installato. Verifica aggiornamenti..." -ForegroundColor Gray
                 }
                 else {
                     Write-Host " - Installazione di $($app.name)..." -ForegroundColor Gray
                 }
-                Start-Process winget -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements" -Wait -NoNewWindow
+                Start-Process winget -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements --source winget" -Wait -NoNewWindow
             }
             $SummaryLog += "[-] Applicazioni Winget verificate"
         }
