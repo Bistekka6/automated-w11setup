@@ -8,7 +8,7 @@ Script di configurazione post-installazione per PC Windows 11 e Windows 10, prog
 - Impostazione informazioni OEM (Produttore, Sito, Telefono).
 - Esecuzione di **Win11Debloat** (ottimizzazione sistema e protezione app Microsoft).
 - Rimozione automatica di McAfee e WebAdvisor.
-- Installazione app tramite **Winget** (Chrome, Office, Acrobat).
+- Installazione app tramite **Winget** (Chrome, Office, Acrobat) con **ripristino automatico delle sorgenti** in caso di errore di certificato (0x8a15005e).
 - Rilevamento hardware Dell/Lenovo per installazione utility specifiche.
 - Installazione app locali da cartella `installers/`.
 - Download e installazione automatica di **WatchGuard Mobile VPN**.

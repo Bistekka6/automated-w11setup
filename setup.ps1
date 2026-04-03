@@ -233,6 +233,15 @@ public class Wallpaper {
                 Start-Sleep -Seconds 5
             }
 
+            # --- Self-healing per le sorgenti Winget ---
+            Write-Host " - Verifica e aggiornamento sorgenti Winget..." -ForegroundColor Gray
+            $sourceUpdateOutput = winget source update 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0 -or $sourceUpdateOutput -match "0x8a15005e") {
+                Write-Warning " - Rilevato errore sorgenti Winget (es. certificato scaduto o metadati corrotti). Tentativo di ripristino automatico..."
+                winget source reset --force | Out-Null
+                winget source update | Out-Null
+            }
+
             $apps = @(
                 @{ id = "Google.Chrome"; name = "Chrome" },
                 @{ id = "Microsoft.Office"; name = "Office" },
