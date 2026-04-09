@@ -21,6 +21,10 @@ $RemoteBackgroundUrl = "$GitHubRepoUrl/background/background.png"
 # Configurazione Protocolli di Sicurezza (TLS 1.2)
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
+# Forza la Execution Policy per la sessione corrente (Processo)
+# Questo risolve l'errore "script non abilitati" senza cambiare le impostazioni di sistema permanenti.
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+
 $ErrorActionPreference = "Stop"
 $SummaryLog = @()
 
@@ -201,6 +205,11 @@ public class Wallpaper {
             }
             $currentLoc = Get-Location
             Set-Location -Path $debloatDir
+            
+            # Sblocca i file scaricati di Win11Debloat per evitare errori di sicurezza
+            Write-Host " - Sbloccaggio file di Win11Debloat..." -ForegroundColor Gray
+            Get-ChildItem -Path $debloatDir -Recurse | Unblock-File -ErrorAction SilentlyContinue
+            
             & $debloatScriptPath -Silent -RunDefaults
             Set-Location -Path $currentLoc
             $SummaryLog += "[-] Win11Debloat eseguito con successo"
