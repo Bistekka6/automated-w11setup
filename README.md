@@ -27,7 +27,7 @@ irm https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps
 ### 2. Modalità Debug
 Esegue lo script mostrando l'output dettagliato di tutti i componenti (incluso Win11Debloat):
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps1))) -DebugMode
+$s=irm https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps1; & ([scriptblock]::Create($s)) -DebugMode
 ```
 
 ## Manutenzione

@@ -7,7 +7,7 @@ param(
     [bool]$RunWindowsUpdate = $false,
     [bool]$CheckBitlocker = $false,
     [bool]$Unattended = $false,
-    [bool]$DebugMode = $false
+    [switch]$DebugMode
 )
 
 <#
