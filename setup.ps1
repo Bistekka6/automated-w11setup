@@ -229,8 +229,15 @@ public class Wallpaper {
                 Write-Host " [DEBUG] Esecuzione di Win11Debloat con parametri: -RunDefaults -Silent" -ForegroundColor Yellow
             }
 
+            # Ripristina ErrorActionPreference: Win11Debloat usa reg.exe che scrive sullo stderr 
+            # se non trova alcune chiavi, causando il blocco a causa del nostro "Stop" globale.
+            $oldErrPref = $global:ErrorActionPreference
+            $global:ErrorActionPreference = "Continue"
+
             & $debloatScriptPath -RunDefaults -Silent
             
+            $global:ErrorActionPreference = $oldErrPref
+
             Set-Location -Path $currentLoc
             $SummaryLog += "[-] Win11Debloat eseguito con successo"
         }
