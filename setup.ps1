@@ -225,12 +225,11 @@ public class Wallpaper {
             Write-Host " - Sbloccaggio file di Win11Debloat..." -ForegroundColor Gray
             Get-ChildItem -Path $debloatDir -Recurse | Unblock-File -ErrorAction SilentlyContinue
             
-            $debloatArgs = @("-RunDefaults", "-Silent")
             if ($DebugMode) {
-                Write-Host " [DEBUG] Esecuzione di Win11Debloat con parametri: $($debloatArgs -join ' ')" -ForegroundColor Yellow
+                Write-Host " [DEBUG] Esecuzione di Win11Debloat con parametri: -RunDefaults -Silent" -ForegroundColor Yellow
             }
 
-            & $debloatScriptPath @debloatArgs
+            & $debloatScriptPath -RunDefaults -Silent
             
             Set-Location -Path $currentLoc
             $SummaryLog += "[-] Win11Debloat eseguito con successo"
