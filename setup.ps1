@@ -6,7 +6,8 @@ param(
     [bool]$ConfigureTaskbar = $false,
     [bool]$RunWindowsUpdate = $false,
     [bool]$CheckBitlocker = $false,
-    [bool]$Unattended = $false
+    [bool]$Unattended = $false,
+    [bool]$DebugMode = $false
 )
 
 <#
@@ -195,14 +196,28 @@ public class Wallpaper {
         try {
             $debloatDir = Join-Path $ScriptDir "Win11Debloat"
             $debloatScriptPath = Join-Path $debloatDir "Win11Debloat.ps1"
+            
+            if ($DebugMode) {
+                Write-Host " [DEBUG] Directory debloat: $debloatDir" -ForegroundColor Gray
+                Write-Host " [DEBUG] Script path: $debloatScriptPath" -ForegroundColor Gray
+            }
+
             if (-not (Test-Path $debloatScriptPath)) {
+                Write-Host " - Download di Win11Debloat in corso..." -ForegroundColor Gray
                 $zipUrl = "https://github.com/Raphire/Win11Debloat/archive/refs/heads/master.zip"
                 $zipPath = Join-Path $ScriptDir "Win11Debloat.zip"
                 Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+                
+                Write-Host " - Estrazione file..." -ForegroundColor Gray
                 Expand-Archive -Path $zipPath -DestinationPath $ScriptDir -Force
                 Rename-Item -Path (Join-Path $ScriptDir "Win11Debloat-master") -NewName "Win11Debloat" -Force
                 Remove-Item -Path $zipPath -Force
+                
+                if (-not (Test-Path $debloatScriptPath)) {
+                    throw "Errore: Lo script $debloatScriptPath non è stato trovato dopo l'estrazione."
+                }
             }
+
             $currentLoc = Get-Location
             Set-Location -Path $debloatDir
             
@@ -210,7 +225,16 @@ public class Wallpaper {
             Write-Host " - Sbloccaggio file di Win11Debloat..." -ForegroundColor Gray
             Get-ChildItem -Path $debloatDir -Recurse | Unblock-File -ErrorAction SilentlyContinue
             
-            & $debloatScriptPath -Silent -RunDefaults
+            $debloatArgs = @("-RunDefaults")
+            if ($DebugMode) {
+                Write-Host " [DEBUG] Esecuzione di Win11Debloat in modalità DEBUG (senza -Silent)..." -ForegroundColor Yellow
+            }
+            else {
+                $debloatArgs += "-Silent"
+            }
+
+            & $debloatScriptPath @debloatArgs
+            
             Set-Location -Path $currentLoc
             $SummaryLog += "[-] Win11Debloat eseguito con successo"
         }
@@ -267,13 +291,13 @@ public class Wallpaper {
 
             foreach ($app in $apps) {
                 # Usa il codice di uscita per verificare l'installazione (0 = installato, altro = non trovato)
-                $null = winget list --id $($app.id) --exact --source winget --nowarn 2>$null
+                $null = winget list --id $($app.id) --exact --source winget 2>$null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host " - $($app.name) già installato. Verifica aggiornamenti..." -ForegroundColor Gray
                 }
                 else {
                     Write-Host " - Installazione di $($app.name)..." -ForegroundColor Gray
-                    Start-Process winget -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements --source winget --nowarn" -Wait -NoNewWindow
+                    Start-Process winget -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements --source winget" -Wait -NoNewWindow
                 }
             }
             $SummaryLog += "[-] Applicazioni Winget verificate"

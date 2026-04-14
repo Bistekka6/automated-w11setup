@@ -16,13 +16,19 @@ Script di configurazione post-installazione per PC Windows 11 e Windows 10, prog
 - Avvio aggiornamenti Windows e controllo BitLocker.
 
 ## Esecuzione Rapida
-Per avviare lo script su un nuovo PC, apri PowerShell come Amministratore e incolla il seguente comando:
+Per avviare lo script su un nuovo PC, apri PowerShell come Amministratore e scegli una delle seguenti modalità:
 
+### 1. Modalità Standard (Consigliata)
+Esegue lo script normalmente con menu interattivo:
 ```powershell
 irm https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps1 | iex
 ```
 
-Questo comando scarica ed esegue l'ultima versione dello script direttamente dal repository.
+### 2. Modalità Debug
+Esegue lo script mostrando l'output dettagliato di tutti i componenti (incluso Win11Debloat):
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Bistekka6/automated-w11setup/main/setup.ps1))) -DebugMode
+```
 
 ## Manutenzione
 Per aggiungere nuovi file `.msi` o `.exe`, inseriscili nella cartella `installers/` e aggiorna `args.json` se necessario.
