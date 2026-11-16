@@ -249,14 +249,118 @@ public class Wallpaper {
 
     # --- Rimozione McAfee ---
     Write-Host "`nRimozione McAfee..." -ForegroundColor Cyan
+    $GetMcAfeeUninstallEntries = {
+        $uninstallPaths = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+        )
+        $entries = @()
+
+        foreach ($uninstallPath in $uninstallPaths) {
+            if (Test-Path -LiteralPath $uninstallPath) {
+                try {
+                    foreach ($entryKey in (Get-ChildItem -LiteralPath $uninstallPath -ErrorAction Stop)) {
+                        try {
+                            $entry = Get-ItemProperty -LiteralPath $entryKey.PSPath -ErrorAction Stop
+                            if ($entry.DisplayName -match "(?i)McAfee|WebAdvisor") {
+                                $entries += [PSCustomObject]@{
+                                    Name                 = $entry.DisplayName
+                                    UninstallString      = $entry.UninstallString
+                                    QuietUninstallString = $entry.QuietUninstallString
+                                    RegistryPath         = $entryKey.PSPath
+                                }
+                            }
+                        }
+                        catch {
+                            Write-Warning " - Impossibile leggere una voce di disinstallazione in $uninstallPath`: $($_.Exception.Message)"
+                        }
+                    }
+                }
+                catch {
+                    Write-Warning " - Impossibile esaminare $uninstallPath`: $($_.Exception.Message)"
+                }
+            }
+        }
+
+        return $entries
+    }
+
     try {
-        $mc = Get-WmiObject -Class Win32_Product | Where-Object { $_.Name -like "McAfee*" -or $_.Name -like "*WebAdvisor*" }
-        if ($mc) {
-            foreach ($app in $mc) { $app.Uninstall() | Out-Null }
-            $SummaryLog += "[-] McAfee rimosso"
+        $mcAfeeEntries = @(& $GetMcAfeeUninstallEntries)
+        if ($mcAfeeEntries.Count -eq 0) {
+            Write-Host " - Nessun prodotto McAfee o WebAdvisor rilevato." -ForegroundColor Gray
+        }
+        else {
+            foreach ($app in $mcAfeeEntries) {
+                if (-not (Test-Path -LiteralPath $app.RegistryPath)) {
+                    continue
+                }
+
+                $uninstallCommand = $app.QuietUninstallString
+                if ([string]::IsNullOrWhiteSpace($uninstallCommand)) {
+                    $uninstallCommand = $app.UninstallString
+                }
+                if ([string]::IsNullOrWhiteSpace($uninstallCommand)) {
+                    Write-Warning " - Nessun comando di disinstallazione registrato per $($app.Name)."
+                    continue
+                }
+
+                Write-Host " - Disinstallazione di $($app.Name)..." -ForegroundColor Gray
+                try {
+                    if ($uninstallCommand -match "(?i)\bmsiexec(?:\.exe)?\b") {
+                        if ($uninstallCommand -notmatch "(?i)\{[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\}") {
+                            throw "Codice prodotto MSI non trovato nel comando di disinstallazione."
+                        }
+
+                        $productCode = $Matches[0]
+                        $uninstallProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList "/x $productCode /qn /norestart" -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                    }
+                    else {
+                        if ($uninstallCommand -match '^\s*"([^"]+)"\s*(.*)$') {
+                            $uninstallerPath = $Matches[1]
+                            $uninstallerArguments = $Matches[2]
+                        }
+                        elseif ($uninstallCommand -match '^\s*(.+?\.exe)(?:\s+(.*))?$') {
+                            $uninstallerPath = $Matches[1].Trim()
+                            $uninstallerArguments = $Matches[2]
+                        }
+                        else {
+                            throw "Formato del comando di disinstallazione non riconosciuto: $uninstallCommand"
+                        }
+
+                        if (-not (Test-Path -LiteralPath $uninstallerPath)) {
+                            throw "Uninstaller non trovato: $uninstallerPath"
+                        }
+
+                        $uninstallProcess = Start-Process -FilePath $uninstallerPath -ArgumentList $uninstallerArguments -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                    }
+
+                    if ($uninstallProcess.ExitCode -notin @(0, 1605, 1614, 1641, 3010)) {
+                        Write-Warning " - Disinstallazione di $($app.Name) terminata con codice $($uninstallProcess.ExitCode)."
+                    }
+                }
+                catch {
+                    Write-Warning " - Errore disinstallazione di $($app.Name): $($_.Exception.Message)"
+                }
+            }
+
+            $remainingMcAfeeEntries = @(& $GetMcAfeeUninstallEntries)
+            if ($remainingMcAfeeEntries.Count -eq 0) {
+                Write-Host " - McAfee e WebAdvisor rimossi." -ForegroundColor Green
+                $SummaryLog += "[-] McAfee e WebAdvisor rimossi"
+            }
+            else {
+                $remainingNames = ($remainingMcAfeeEntries | ForEach-Object { $_.Name } | Select-Object -Unique) -join ", "
+                Write-Warning " - Alcuni componenti McAfee risultano ancora installati: $remainingNames"
+                $SummaryLog += "[!] Disinstallazione McAfee incompleta: $remainingNames"
+            }
         }
     }
-    catch { Write-Warning " - Errore rimozione McAfee" }
+    catch {
+        Write-Warning " - Errore durante il rilevamento o la rimozione di McAfee: $($_.Exception.Message)"
+        $SummaryLog += "[!] Errore rimozione McAfee"
+    }
 
     # --- 4. App di Winget ---
     if ($InstallWingetApps) {
