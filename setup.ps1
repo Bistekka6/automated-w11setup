@@ -264,18 +264,28 @@ public class Wallpaper {
         try {
             if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
                 $wingetUrl = "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle"
-                Invoke-WebRequest -Uri $wingetUrl -OutFile "$env:TEMP\winget.msixbundle" -UseBasicParsing
-                Add-AppxPackage -Path "$env:TEMP\winget.msixbundle"
-                Start-Sleep -Seconds 5
+                try {
+                    Invoke-WebRequest -Uri $wingetUrl -OutFile "$env:TEMP\winget.msixbundle" -UseBasicParsing -ErrorAction Stop
+                    Add-AppxPackage -Path "$env:TEMP\winget.msixbundle" -ErrorAction Stop
+                    Start-Sleep -Seconds 5
+                }
+                catch {
+                    Write-Warning " - Impossibile installare Winget: $($_.Exception.Message)"
+                }
             }
 
             # --- Self-healing per le sorgenti Winget ---
-            Write-Host " - Verifica e aggiornamento sorgenti Winget..." -ForegroundColor Gray
-            $sourceUpdateOutput = winget source update 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0 -or $sourceUpdateOutput -match "0x8a15005e") {
-                Write-Warning " - Rilevato errore sorgenti Winget (es. certificato scaduto o metadati corrotti). Tentativo di ripristino automatico..."
-                winget source reset --force | Out-Null
-                winget source update | Out-Null
+            try {
+                Write-Host " - Verifica e aggiornamento sorgenti Winget..." -ForegroundColor Gray
+                $sourceUpdateOutput = winget source update 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0 -or $sourceUpdateOutput -match "0x8a15005e") {
+                    Write-Warning " - Rilevato errore sorgenti Winget (es. certificato scaduto o metadati corrotti). Tentativo di ripristino automatico..."
+                    winget source reset --force | Out-Null
+                    winget source update | Out-Null
+                }
+            }
+            catch {
+                Write-Warning " - Errore aggiornamento sorgenti Winget: $($_.Exception.Message)"
             }
 
             $apps = @(
@@ -293,14 +303,79 @@ public class Wallpaper {
             }
 
             foreach ($app in $apps) {
-                # Usa il codice di uscita per verificare l'installazione (0 = installato, altro = non trovato)
-                $null = winget list --id $($app.id) --exact --source winget 2>$null
-                if ($LASTEXITCODE -eq 0) {
+                $isInstalled = $false
+                try {
+                    $null = winget list --id $($app.id) --exact --source winget 2>$null
+                    $isInstalled = $LASTEXITCODE -eq 0
+                }
+                catch {
+                    Write-Warning " - Impossibile verificare $($app.name) con Winget: $($_.Exception.Message)"
+                }
+
+                $installSucceeded = $false
+                if ($isInstalled) {
                     Write-Host " - $($app.name) già installato. Verifica aggiornamenti..." -ForegroundColor Gray
                 }
                 else {
                     Write-Host " - Installazione di $($app.name)..." -ForegroundColor Gray
-                    Start-Process winget -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements --source winget" -Wait -NoNewWindow
+                    try {
+                        $installProcess = Start-Process -FilePath "winget" -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements --source winget" -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                        $installSucceeded = $installProcess.ExitCode -eq 0
+                        if (-not $installSucceeded) {
+                            Write-Warning " - Installazione Winget di $($app.name) non riuscita (codice $($installProcess.ExitCode))."
+                        }
+                    }
+                    catch {
+                        Write-Warning " - Errore installazione Winget di $($app.name): $($_.Exception.Message)"
+                    }
+                }
+
+                if ($app.id -eq "Microsoft.Office" -and -not $isInstalled -and -not $installSucceeded) {
+                    Write-Warning " - Avvio installazione di Office tramite setup.exe e file XML..."
+                    $officeFallbackDir = Join-Path $env:TEMP "TecnodataOfficeFallback"
+                    $officeSetupPath = Join-Path $officeFallbackDir "setup.exe"
+                    $officeConfigPath = Join-Path $officeFallbackDir "configuration-Office365-x64.xml"
+                    $bundledOfficeDir = Join-Path $ScriptDir "installers\office"
+                    $bundledOfficeSetupPath = Join-Path $bundledOfficeDir "setup.exe"
+                    $bundledOfficeConfigPath = Join-Path $bundledOfficeDir "configuration-Office365-x64.xml"
+                    $officeFallbackSucceeded = $false
+
+                    try {
+                        if ((Test-Path $bundledOfficeSetupPath) -and (Test-Path $bundledOfficeConfigPath)) {
+                            $officeSetupPath = $bundledOfficeSetupPath
+                            $officeConfigPath = $bundledOfficeConfigPath
+                        }
+                        else {
+                            if (-not (Test-Path $officeFallbackDir)) {
+                                New-Item -ItemType Directory -Path $officeFallbackDir -Force | Out-Null
+                            }
+
+                            Invoke-WebRequest -Uri "$GitHubRepoUrl/installers/office/setup.exe" -OutFile $officeSetupPath -UseBasicParsing -ErrorAction Stop
+                            Invoke-WebRequest -Uri "$GitHubRepoUrl/installers/office/configuration-Office365-x64.xml" -OutFile $officeConfigPath -UseBasicParsing -ErrorAction Stop
+                        }
+
+                        if ((Get-Item $officeSetupPath).Length -eq 0 -or (Get-Item $officeConfigPath).Length -eq 0) {
+                            throw "Il setup.exe o il file XML scaricato è vuoto."
+                        }
+
+                        $officeSetupProcess = Start-Process -FilePath $officeSetupPath -ArgumentList "/configure `"$officeConfigPath`"" -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                        if ($officeSetupProcess.ExitCode -ne 0) {
+                            throw "setup.exe ha restituito il codice $($officeSetupProcess.ExitCode)."
+                        }
+
+                        $officeFallbackSucceeded = $true
+                        Write-Host " - Office installato tramite setup.exe." -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Warning " - Installazione di Office tramite setup.exe non riuscita: $($_.Exception.Message)"
+                    }
+
+                    if ($officeFallbackSucceeded) {
+                        $SummaryLog += "[-] Office installato tramite setup.exe (fallback dopo errore Winget)"
+                    }
+                    else {
+                        $SummaryLog += "[!] Installazione Office non riuscita né con Winget né con setup.exe"
+                    }
                 }
             }
             $SummaryLog += "[-] Applicazioni Winget verificate"
