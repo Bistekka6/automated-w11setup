@@ -297,8 +297,9 @@ public class Wallpaper {
                     continue
                 }
 
+                $hasQuietUninstallCommand = -not [string]::IsNullOrWhiteSpace($app.QuietUninstallString)
                 $uninstallCommand = $app.QuietUninstallString
-                if ([string]::IsNullOrWhiteSpace($uninstallCommand)) {
+                if (-not $hasQuietUninstallCommand) {
                     $uninstallCommand = $app.UninstallString
                 }
                 if ([string]::IsNullOrWhiteSpace($uninstallCommand)) {
@@ -319,11 +320,11 @@ public class Wallpaper {
                     else {
                         if ($uninstallCommand -match '^\s*"([^"]+)"\s*(.*)$') {
                             $uninstallerPath = $Matches[1]
-                            $uninstallerArguments = $Matches[2]
+                            $uninstallerArguments = if ($Matches[2]) { $Matches[2] } else { "" }
                         }
                         elseif ($uninstallCommand -match '^\s*(.+?\.exe)(?:\s+(.*))?$') {
                             $uninstallerPath = $Matches[1].Trim()
-                            $uninstallerArguments = $Matches[2]
+                            $uninstallerArguments = if ($Matches[2]) { $Matches[2] } else { "" }
                         }
                         else {
                             throw "Formato del comando di disinstallazione non riconosciuto: $uninstallCommand"
@@ -333,7 +334,25 @@ public class Wallpaper {
                             throw "Uninstaller non trovato: $uninstallerPath"
                         }
 
-                        $uninstallProcess = Start-Process -FilePath $uninstallerPath -ArgumentList $uninstallerArguments -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                        $uninstallerArguments = $uninstallerArguments.Trim()
+                        $hasSilentSwitch = $uninstallerArguments -match '(?i)(?:^|\s)(?:/|-)(?:s|silent|quiet|qn|verysilent)(?:\s|$)'
+                        if (-not $hasQuietUninstallCommand) {
+                            if ($app.Name -match "(?i)WebAdvisor" -and -not $hasSilentSwitch) {
+                                $uninstallerArguments = "$uninstallerArguments /s".Trim()
+                                $hasSilentSwitch = $true
+                            }
+
+                            if (-not $hasSilentSwitch) {
+                                throw "Nessun comando di disinstallazione silenziosa disponibile per $($app.Name); evito di aprire la procedura interattiva."
+                            }
+                        }
+
+                        if ([string]::IsNullOrWhiteSpace($uninstallerArguments)) {
+                            $uninstallProcess = Start-Process -FilePath $uninstallerPath -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                        }
+                        else {
+                            $uninstallProcess = Start-Process -FilePath $uninstallerPath -ArgumentList $uninstallerArguments -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                        }
                     }
 
                     if ($uninstallProcess.ExitCode -notin @(0, 1605, 1614, 1641, 3010)) {
@@ -395,6 +414,7 @@ public class Wallpaper {
             $apps = @(
                 @{ id = "Google.Chrome"; name = "Chrome" },
                 @{ id = "Microsoft.Office"; name = "Office" },
+                @{ id = "Microsoft.Teams"; name = "Teams" },
                 @{ id = "Adobe.Acrobat.Reader.64-bit"; name = "Acrobat Reader" },
                 @{ id = "WatchGuard.MobileVPNWithSSLClient"; name = "WatchGuard Mobile VPN" }
             )
