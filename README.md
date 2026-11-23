@@ -14,7 +14,7 @@ Script di configurazione post-installazione per PC Windows 11 e Windows 10, prog
 - Download e installazione automatica di **WatchGuard Mobile VPN**.
 - Configurazione Taskbar.
 - Avvio aggiornamenti Windows e controllo BitLocker.
-- Registrazione dell'intera sessione PowerShell in `%LOCALAPPDATA%\WindowsSetup\Logs\setup-<data>-<processo>.log`. Il percorso del log viene mostrato all'avvio delle operazioni.
+- Registrazione dettagliata in `%LOCALAPPDATA%\WindowsSetup\Logs\setup-<data>-<processo>.log`: include diagnostica dell'ambiente, operazioni e verifiche effettuate, output standard/errore e codici di uscita dei processi Winget e Office, dettagli completi degli errori, oltre alla trascrizione della sessione. Il log viene arricchito con informazioni operative non mostrate a video e il suo percorso viene indicato all'avvio.
 
 ## Esecuzione Rapida
 Per avviare lo script su un nuovo PC, apri PowerShell come Amministratore e scegli una delle seguenti modalità:

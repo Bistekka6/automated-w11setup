@@ -30,6 +30,68 @@ $ErrorActionPreference = "Stop"
 $SummaryLog = @()
 $TranscriptStarted = $false
 
+function Write-SetupLog {
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [ValidateSet("INFO", "WARN", "ERROR")][string]$Level = "INFO"
+    )
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fffK"
+    foreach ($line in ($Message -split "\r?\n")) {
+        Add-Content -LiteralPath $script:LogPath -Value "$timestamp [$Level] $line" -Encoding UTF8
+    }
+}
+
+function Start-SetupProcess {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string]$ArgumentList,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $processId = [guid]::NewGuid().ToString("N")
+    $stdoutPath = Join-Path $env:TEMP "setup-$processId-stdout.tmp"
+    $stderrPath = Join-Path $env:TEMP "setup-$processId-stderr.tmp"
+    try {
+        Write-SetupLog "Avvio processo ${Label}: $FilePath $ArgumentList"
+        $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -ErrorAction Stop
+        $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
+        Write-SetupLog "Processo $Label ($FilePath): PID $($process.Id), codice uscita $($process.ExitCode)"
+        if (-not [string]::IsNullOrWhiteSpace($stdout)) { Write-SetupLog "stdout $Label`:`n$stdout" }
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) { Write-SetupLog "stderr $Label`:`n$stderr" "WARN" }
+        return $process
+    }
+    finally {
+        foreach ($tempPath in @($stdoutPath, $stderrPath)) {
+            if (Test-Path -LiteralPath $tempPath) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop
+            }
+        }
+    }
+}
+
+function Write-SetupErrorDetails {
+    param([Parameter(Mandatory)][System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    if ([string]::IsNullOrWhiteSpace($script:LogPath)) {
+        Write-Host "Dettagli errore: $($ErrorRecord.Exception.ToString())"
+        return
+    }
+    if (-not (Test-Path -LiteralPath $script:LogPath)) {
+        Write-Host "Dettagli errore: $($ErrorRecord.Exception.ToString())"
+        return
+    }
+
+    Write-SetupLog "Eccezione: $($ErrorRecord.Exception.ToString())" "ERROR"
+    if ($ErrorRecord.InvocationInfo -and -not [string]::IsNullOrWhiteSpace($ErrorRecord.InvocationInfo.Line)) {
+        Write-SetupLog "Istruzione: $($ErrorRecord.InvocationInfo.Line.Trim())" "ERROR"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ErrorRecord.ScriptStackTrace)) {
+        Write-SetupLog "Stack: $($ErrorRecord.ScriptStackTrace)" "ERROR"
+    }
+}
+
 try {
     # --- 1. Verifica Amministratore ---
     if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -50,6 +112,7 @@ try {
                 Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempScript`"" -Verb RunAs
             }
             catch {
+                Write-SetupErrorDetails $_
                 Write-Error "Impossibile scaricare lo script per l'elevazione: $($_.Exception.Message)"
                 Read-Host "Premi Invio per uscire..."
             }
@@ -67,16 +130,27 @@ try {
         Write-Host " - Esecuzione remota rilevata. Cartella di lavoro: $ScriptDir" -ForegroundColor Gray
     }
 
-    # Registra l'output completo della sessione per consentire la verifica dell'esecuzione.
+    # Salva i dettagli operativi e aggiunge la trascrizione della sessione al termine.
     $LogDir = Join-Path $env:LOCALAPPDATA "WindowsSetup\Logs"
     if (-not (Test-Path $LogDir)) {
         New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
     }
     $LogTimestamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $LogPath = Join-Path $LogDir "setup-$LogTimestamp-$PID.log"
-    Start-Transcript -Path $LogPath -ErrorAction Stop | Out-Null
+    $TranscriptPath = Join-Path $LogDir "setup-$LogTimestamp-$PID-transcript.log"
+    $RunStartedAt = Get-Date
+    Set-Content -LiteralPath $LogPath -Value "Log dettagliato dell'esecuzione Setup" -Encoding UTF8 -ErrorAction Stop
+    Write-SetupLog "Avvio: $($RunStartedAt.ToString('o'))"
+    Write-SetupLog "Computer: $env:COMPUTERNAME"
+    Write-SetupLog "Utente: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+    Write-SetupLog "PowerShell: $($PSVersionTable.PSVersion)"
+    Write-SetupLog "Sistema operativo: $([Environment]::OSVersion.VersionString)"
+    Write-SetupLog "Script: $PSCommandPath"
+    Write-SetupLog "Directory di lavoro: $(Get-Location)"
+    Start-Transcript -Path $TranscriptPath -ErrorAction Stop | Out-Null
     $TranscriptStarted = $true
     Write-Host "File di log dell'esecuzione: $LogPath" -ForegroundColor Gray
+    Write-SetupLog "Parametri iniziali: ConfigureSystem=$ConfigureSystem; RunDebloat=$RunDebloat; InstallWingetApps=$InstallWingetApps; InstallLocalApps=$InstallLocalApps; ConfigureTaskbar=$ConfigureTaskbar; RunWindowsUpdate=$RunWindowsUpdate; CheckBitlocker=$CheckBitlocker; Unattended=$Unattended; DebugMode=$DebugMode"
 
     # --- Menu Interattivo ---
     if (-not $Unattended) {
@@ -87,9 +161,13 @@ try {
         
         $renamePc = Read-Host "Vuoi rinominare il PC? (Lascia vuoto per saltare, altrimenti scrivi il nuovo nome)"
         if ([string]::IsNullOrWhiteSpace($renamePc) -eq $false) {
+            Write-SetupLog "Richiesta rinomina PC: $renamePc"
             Rename-Computer -NewName $renamePc -PassThru
             $SummaryLog += "[-] PC rinominato in: $renamePc (Richiede riavvio)"
             Write-Host "Nome del PC aggiornato. Sarà effettivo al prossimo riavvio.`n" -ForegroundColor Yellow
+        }
+        else {
+            Write-SetupLog "Rinomina PC saltata"
         }
 
         do {
@@ -105,6 +183,7 @@ try {
             Write-Host " 0. Esci dallo Script"
             
             $scelta = Read-Host "`nInserisci la tua scelta (0-8)"
+            Write-SetupLog "Scelta menu: $scelta"
         } until ($scelta -match '^[0-8]$')
 
         if ($scelta -eq '0') {
@@ -135,22 +214,35 @@ try {
         Start-Sleep -Seconds 3
     }
 
+    $SelectedOperations = "ConfigureSystem=$ConfigureSystem; RunDebloat=$RunDebloat; InstallWingetApps=$InstallWingetApps; InstallLocalApps=$InstallLocalApps; ConfigureTaskbar=$ConfigureTaskbar; RunWindowsUpdate=$RunWindowsUpdate; CheckBitlocker=$CheckBitlocker"
+    Write-SetupLog "Operazioni selezionate: $SelectedOperations"
+
     # --- 2. Configurazione Impostazioni di Sistema ---
     if ($ConfigureSystem) {
         try {
             Write-Host "`n[1/4] Configurazione Impostazioni di Sistema..." -ForegroundColor Cyan
+            Write-SetupLog "Fase: configurazione impostazioni di sistema"
             
             # Profilo di Risparmio Energia: Bilanciato
             powercfg /SETACTIVE 381b4222-f694-41f0-9685-ff5bb260df2e
+            Write-SetupLog "Comando powercfg /SETACTIVE terminato con codice $LASTEXITCODE"
             powercfg /x -standby-timeout-ac 0
+            Write-SetupLog "Comando powercfg standby-timeout-ac terminato con codice $LASTEXITCODE"
             powercfg /x -standby-timeout-dc 0
+            Write-SetupLog "Comando powercfg standby-timeout-dc terminato con codice $LASTEXITCODE"
             powercfg /x -monitor-timeout-ac 15
+            Write-SetupLog "Comando powercfg monitor-timeout-ac terminato con codice $LASTEXITCODE"
             powercfg /x -monitor-timeout-dc 15
+            Write-SetupLog "Comando powercfg monitor-timeout-dc terminato con codice $LASTEXITCODE"
             Write-Host " - Risparmio energia e timeout configurati." -ForegroundColor Gray
             
             # Consenti Ping (ICMPv4-In)
             if (-not (Get-NetFirewallRule -DisplayName "Allow ICMPv4-In" -ErrorAction SilentlyContinue)) {
                 New-NetFirewallRule -DisplayName "Allow ICMPv4-In" -Protocol ICMPv4 -IcmpType 8 -Enabled True -Profile Any -Action Allow | Out-Null
+                Write-SetupLog "Regola firewall Allow ICMPv4-In creata"
+            }
+            else {
+                Write-SetupLog "Regola firewall Allow ICMPv4-In già presente"
             }
             Write-Host " - Firewall (Ping) configurato." -ForegroundColor Gray
 
@@ -160,6 +252,7 @@ try {
             Set-ItemProperty -Path $oemKey -Name "Manufacturer" -Value "Tecnodata Trentina Srl" -Type String -Force
             Set-ItemProperty -Path $oemKey -Name "SupportURL" -Value "https://support.tecnodata.it/" -Type String -Force
             Set-ItemProperty -Path $oemKey -Name "SupportPhone" -Value "04611780400" -Type String -Force
+            Write-SetupLog "Informazioni OEM aggiornate nella chiave $oemKey"
             Write-Host " - Informazioni OEM impostate." -ForegroundColor Gray
 
             # --- Sfondo Aziendale ---
@@ -170,11 +263,19 @@ try {
             if (-not (Test-Path $LocalBackgroundPath)) {
                 if (-not $PSCommandPath) {
                     Write-Host " - Download dello sfondo aziendale..." -ForegroundColor Gray
-                    Invoke-WebRequest -Uri $RemoteBackgroundUrl -OutFile $LocalBackgroundPath -UseBasicParsing -ErrorAction SilentlyContinue
+                    try {
+                        Invoke-WebRequest -Uri $RemoteBackgroundUrl -OutFile $LocalBackgroundPath -UseBasicParsing -ErrorAction Stop
+                        Write-SetupLog "Sfondo scaricato da $RemoteBackgroundUrl"
+                    }
+                    catch {
+                        Write-Warning " - Download dello sfondo non riuscito: $($_.Exception.Message)"
+                        Write-SetupErrorDetails $_
+                    }
                 }
             }
             
             if (Test-Path $LocalBackgroundPath) {
+                Write-SetupLog "Applicazione sfondo da $LocalBackgroundPath"
                 Write-Host " - Applicazione dello sfondo desktop..." -ForegroundColor Gray
                 $code = @"
 using System;
@@ -198,6 +299,7 @@ public class Wallpaper {
         }
         catch {
             Write-Warning " - Errore durante la configurazione di sistema: $($_.Exception.Message)"
+            Write-SetupErrorDetails $_
             $SummaryLog += "[!] Errore configurazione sistema (parziale)"
         }
     }
@@ -205,6 +307,7 @@ public class Wallpaper {
     # --- 3. Win11Debloat ---
     if ($RunDebloat) {
         Write-Host "`n[2/4] Esecuzione di Win11Debloat..." -ForegroundColor Cyan
+        Write-SetupLog "Fase: Win11Debloat"
         try {
             $debloatDir = Join-Path $ScriptDir "Win11Debloat"
             $debloatScriptPath = Join-Path $debloatDir "Win11Debloat.ps1"
@@ -215,6 +318,7 @@ public class Wallpaper {
             }
 
             if (-not (Test-Path $debloatScriptPath)) {
+                Write-SetupLog "Win11Debloat non presente; download archivio da $zipUrl"
                 Write-Host " - Download di Win11Debloat in corso..." -ForegroundColor Gray
                 $zipUrl = "https://github.com/Raphire/Win11Debloat/archive/refs/heads/master.zip"
                 $zipPath = Join-Path $ScriptDir "Win11Debloat.zip"
@@ -247,6 +351,7 @@ public class Wallpaper {
             $global:ErrorActionPreference = "Continue"
 
             & $debloatScriptPath -RunDefaults -Silent
+            Write-SetupLog "Win11Debloat terminato"
             
             $global:ErrorActionPreference = $oldErrPref
 
@@ -255,6 +360,7 @@ public class Wallpaper {
         }
         catch {
             Write-Warning " - Errore Win11Debloat: $($_.Exception.Message)"
+            Write-SetupErrorDetails $_
             if ($currentLoc) { Set-Location -Path $currentLoc }
         }
     }
@@ -286,11 +392,13 @@ public class Wallpaper {
                         }
                         catch {
                             Write-Warning " - Impossibile leggere una voce di disinstallazione in $uninstallPath`: $($_.Exception.Message)"
+                            Write-SetupErrorDetails $_
                         }
                     }
                 }
                 catch {
                     Write-Warning " - Impossibile esaminare $uninstallPath`: $($_.Exception.Message)"
+                    Write-SetupErrorDetails $_
                 }
             }
         }
@@ -300,6 +408,7 @@ public class Wallpaper {
 
     try {
         $mcAfeeEntries = @(& $GetMcAfeeUninstallEntries)
+        Write-SetupLog "Prodotti McAfee/WebAdvisor rilevati: $($mcAfeeEntries.Count)"
         if ($mcAfeeEntries.Count -eq 0) {
             Write-Host " - Nessun prodotto McAfee o WebAdvisor rilevato." -ForegroundColor Gray
         }
@@ -321,6 +430,7 @@ public class Wallpaper {
 
                 Write-Host " - Disinstallazione di $($app.Name)..." -ForegroundColor Gray
                 try {
+                    Write-SetupLog "Avvio disinstallazione di $($app.Name)"
                     if ($uninstallCommand -match "(?i)\bmsiexec(?:\.exe)?\b") {
                         if ($uninstallCommand -notmatch "(?i)\{[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\}") {
                             throw "Codice prodotto MSI non trovato nel comando di disinstallazione."
@@ -367,16 +477,19 @@ public class Wallpaper {
                         }
                     }
 
+                    Write-SetupLog "Processo disinstallazione $($app.Name): PID $($uninstallProcess.Id), codice uscita $($uninstallProcess.ExitCode)"
                     if ($uninstallProcess.ExitCode -notin @(0, 1605, 1614, 1641, 3010)) {
                         Write-Warning " - Disinstallazione di $($app.Name) terminata con codice $($uninstallProcess.ExitCode)."
                     }
                 }
                 catch {
                     Write-Warning " - Errore disinstallazione di $($app.Name): $($_.Exception.Message)"
+                    Write-SetupErrorDetails $_
                 }
             }
 
             $remainingMcAfeeEntries = @(& $GetMcAfeeUninstallEntries)
+            Write-SetupLog "Componenti McAfee/WebAdvisor residui: $($remainingMcAfeeEntries.Count)"
             if ($remainingMcAfeeEntries.Count -eq 0) {
                 Write-Host " - McAfee e WebAdvisor rimossi." -ForegroundColor Green
                 $SummaryLog += "[-] McAfee e WebAdvisor rimossi"
@@ -390,14 +503,17 @@ public class Wallpaper {
     }
     catch {
         Write-Warning " - Errore durante il rilevamento o la rimozione di McAfee: $($_.Exception.Message)"
+        Write-SetupErrorDetails $_
         $SummaryLog += "[!] Errore rimozione McAfee"
     }
 
     # --- 4. App di Winget ---
     if ($InstallWingetApps) {
         Write-Host "`n[3/4] Installazione Applicazioni Winget..." -ForegroundColor Cyan
+        Write-SetupLog "Fase: installazione/verifica applicazioni Winget"
         try {
             if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+                Write-SetupLog "Winget non trovato; tentativo di installazione del pacchetto App Installer"
                 $wingetUrl = "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle"
                 try {
                     Invoke-WebRequest -Uri $wingetUrl -OutFile "$env:TEMP\winget.msixbundle" -UseBasicParsing -ErrorAction Stop
@@ -406,6 +522,7 @@ public class Wallpaper {
                 }
                 catch {
                     Write-Warning " - Impossibile installare Winget: $($_.Exception.Message)"
+                    Write-SetupErrorDetails $_
                 }
             }
 
@@ -413,14 +530,21 @@ public class Wallpaper {
             try {
                 Write-Host " - Verifica e aggiornamento sorgenti Winget..." -ForegroundColor Gray
                 $sourceUpdateOutput = winget source update 2>&1 | Out-String
-                if ($LASTEXITCODE -ne 0 -or $sourceUpdateOutput -match "0x8a15005e") {
+                $sourceUpdateExitCode = $LASTEXITCODE
+                Write-SetupLog "winget source update: codice $sourceUpdateExitCode; output: $sourceUpdateOutput"
+                if ($sourceUpdateExitCode -ne 0 -or $sourceUpdateOutput -match "0x8a15005e") {
                     Write-Warning " - Rilevato errore sorgenti Winget (es. certificato scaduto o metadati corrotti). Tentativo di ripristino automatico..."
-                    winget source reset --force | Out-Null
-                    winget source update | Out-Null
+                    $sourceResetOutput = winget source reset --force 2>&1 | Out-String
+                    $sourceResetExitCode = $LASTEXITCODE
+                    Write-SetupLog "winget source reset --force: codice $sourceResetExitCode; output: $sourceResetOutput"
+                    $sourceRetryOutput = winget source update 2>&1 | Out-String
+                    $sourceRetryExitCode = $LASTEXITCODE
+                    Write-SetupLog "winget source update dopo reset: codice $sourceRetryExitCode; output: $sourceRetryOutput"
                 }
             }
             catch {
                 Write-Warning " - Errore aggiornamento sorgenti Winget: $($_.Exception.Message)"
+                Write-SetupErrorDetails $_
             }
 
             $apps = @(
@@ -432,6 +556,7 @@ public class Wallpaper {
             )
 
             $manufacturer = (Get-WmiObject Win32_ComputerSystem).Manufacturer
+            Write-SetupLog "Produttore rilevato: $manufacturer"
             if ($manufacturer -match "Dell") { $apps += @{ id = "Dell.CommandUpdate"; name = "Dell Command Update" } }
             elseif ($manufacturer -match "Lenovo") { 
                 $apps += @{ id = "Lenovo.SystemUpdate"; name = "Lenovo System Update" }
@@ -441,21 +566,26 @@ public class Wallpaper {
             foreach ($app in $apps) {
                 $isInstalled = $false
                 try {
-                    $null = winget list --id $($app.id) --exact --source winget 2>$null
-                    $isInstalled = $LASTEXITCODE -eq 0
+                    $wingetListOutput = winget list --id $($app.id) --exact --source winget 2>&1 | Out-String
+                    $wingetListExitCode = $LASTEXITCODE
+                    Write-SetupLog "winget list --id $($app.id): codice $wingetListExitCode; output: $wingetListOutput"
+                    $isInstalled = $wingetListExitCode -eq 0
                 }
                 catch {
                     Write-Warning " - Impossibile verificare $($app.name) con Winget: $($_.Exception.Message)"
+                    Write-SetupErrorDetails $_
                 }
 
                 $installSucceeded = $false
                 if ($isInstalled) {
+                    Write-SetupLog "$($app.id) già presente secondo winget list"
                     Write-Host " - $($app.name) già installato. Verifica aggiornamenti..." -ForegroundColor Gray
                 }
                 else {
                     Write-Host " - Installazione di $($app.name)..." -ForegroundColor Gray
                     try {
-                        $installProcess = Start-Process -FilePath "winget" -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements --source winget" -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                        Write-SetupLog "Avvio installazione Winget $($app.id)"
+                        $installProcess = Start-SetupProcess -FilePath "winget" -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements --source winget" -Label "winget install $($app.id)"
                         $installSucceeded = $installProcess.ExitCode -eq 0
                         if (-not $installSucceeded) {
                             Write-Warning " - Installazione Winget di $($app.name) non riuscita (codice $($installProcess.ExitCode))."
@@ -463,6 +593,7 @@ public class Wallpaper {
                     }
                     catch {
                         Write-Warning " - Errore installazione Winget di $($app.name): $($_.Exception.Message)"
+                        Write-SetupErrorDetails $_
                     }
                 }
 
@@ -480,8 +611,10 @@ public class Wallpaper {
                         if ((Test-Path $bundledOfficeSetupPath) -and (Test-Path $bundledOfficeConfigPath)) {
                             $officeSetupPath = $bundledOfficeSetupPath
                             $officeConfigPath = $bundledOfficeConfigPath
+                            Write-SetupLog "Uso setup Office e configurazione XML locali"
                         }
                         else {
+                            Write-SetupLog "File Office locali non disponibili; download da $GitHubRepoUrl"
                             if (-not (Test-Path $officeFallbackDir)) {
                                 New-Item -ItemType Directory -Path $officeFallbackDir -Force | Out-Null
                             }
@@ -490,11 +623,12 @@ public class Wallpaper {
                             Invoke-WebRequest -Uri "$GitHubRepoUrl/installers/office/configuration-Office365-x64.xml" -OutFile $officeConfigPath -UseBasicParsing -ErrorAction Stop
                         }
 
+                        Write-SetupLog "Avvio fallback Office con setup: $officeSetupPath; configurazione: $officeConfigPath"
                         if ((Get-Item $officeSetupPath).Length -eq 0 -or (Get-Item $officeConfigPath).Length -eq 0) {
                             throw "Il setup.exe o il file XML scaricato è vuoto."
                         }
 
-                        $officeSetupProcess = Start-Process -FilePath $officeSetupPath -ArgumentList "/configure `"$officeConfigPath`"" -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                        $officeSetupProcess = Start-SetupProcess -FilePath $officeSetupPath -ArgumentList "/configure `"$officeConfigPath`"" -Label "Office setup.exe"
                         if ($officeSetupProcess.ExitCode -ne 0) {
                             throw "setup.exe ha restituito il codice $($officeSetupProcess.ExitCode)."
                         }
@@ -504,6 +638,7 @@ public class Wallpaper {
                     }
                     catch {
                         Write-Warning " - Installazione di Office tramite setup.exe non riuscita: $($_.Exception.Message)"
+                        Write-SetupErrorDetails $_
                     }
 
                     if ($officeFallbackSucceeded) {
@@ -516,7 +651,10 @@ public class Wallpaper {
             }
             $SummaryLog += "[-] Applicazioni Winget verificate"
         }
-        catch { Write-Warning " - Errore Winget" }
+        catch {
+            Write-Warning " - Errore Winget: $($_.Exception.Message)"
+            Write-SetupErrorDetails $_
+        }
     }
 
     # --- 5. App Locali e Speciali ---
@@ -587,6 +725,7 @@ public class Wallpaper {
     # --- 6. Taskbar ---
     if ($ConfigureTaskbar) {
         Write-Host "`nConfigurazione Taskbar in corso..." -ForegroundColor Cyan
+        Write-SetupLog "Fase: configurazione taskbar"
         
         try {
             # Metodo per Windows 11: si basa su LayoutModification.json nel profilo utente
@@ -605,6 +744,7 @@ public class Wallpaper {
             # Proviamo solo a scrivere il file JSON e riavviare Explorer.
             
             $jsonConfig | Out-File -FilePath $taskbarPath -Encoding utf8 -Force
+            Write-SetupLog "Layout taskbar scritto in $taskbarPath"
             
             # Riavvia explorer per applicare (se possibile)
             Stop-Process -Name explorer -Force
@@ -613,6 +753,7 @@ public class Wallpaper {
         }
         catch {
             Write-Warning " - Impossibile configurare la Taskbar: $($_.Exception.Message)"
+            Write-SetupErrorDetails $_
             $SummaryLog += "[!] Errore Taskbar (saltata)"
         }
     }
@@ -620,21 +761,27 @@ public class Wallpaper {
     # --- 7. Aggiornamenti Automatici ---
     if ($RunWindowsUpdate) {
         Write-Host "`nAvvio ricerca aggiornamenti Windows e Driver..." -ForegroundColor Cyan
+        Write-SetupLog "Fase: avvio scansione Windows Update"
         Write-Host " (Il processo avverrà in background tramite UsoClient)"
         try {
-            Start-Process -FilePath "UsoClient.exe" -ArgumentList "StartInteractiveScan" -NoNewWindow
+            $updateProcess = Start-Process -FilePath "UsoClient.exe" -ArgumentList "StartInteractiveScan" -NoNewWindow -PassThru
+            Write-SetupLog "UsoClient avviato: PID $($updateProcess.Id)"
+            Write-Host " - UsoClient avviato: PID $($updateProcess.Id)"
             $SummaryLog += "[-] Ricerca Aggiornamenti Windows e Driver avviata in background"
         }
         catch {
-            Write-Warning " - Impossibile avviare UsoClient."
+            Write-Warning " - Impossibile avviare UsoClient: $($_.Exception.Message)"
+            Write-SetupErrorDetails $_
         }
     }
 
     # --- 8. Controllo BitLocker ---
     if ($CheckBitlocker) {
         Write-Host "`nControllo stato BitLocker in corso..." -ForegroundColor Cyan
+        Write-SetupLog "Fase: controllo BitLocker su $env:SystemDrive"
         try {
             $bl = Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction Stop
+            Write-SetupLog "BitLocker VolumeStatus=$($bl.VolumeStatus); ProtectionStatus=$($bl.ProtectionStatus); EncryptionPercentage=$($bl.EncryptionPercentage)"
             if ($bl.VolumeStatus -eq "FullyDecrypted") {
                 Write-Host " - BitLocker è DISATTIVATO sul disco principale." -ForegroundColor Yellow
                 $SummaryLog += "[-] Stato BitLocker: DISATTIVATO"
@@ -649,7 +796,8 @@ public class Wallpaper {
             }
         }
         catch {
-            Write-Warning " - Impossibile controllare lo stato di BitLocker (potrebbe non essere supportato)."
+            Write-Warning " - Impossibile controllare lo stato di BitLocker (potrebbe non essere supportato): $($_.Exception.Message)"
+            Write-SetupErrorDetails $_
             $SummaryLog += "[-] Stato BitLocker: Non verificabile / Non supportato"
         }
     }
@@ -667,10 +815,12 @@ public class Wallpaper {
     }
     Write-Host "=================================================`n" -ForegroundColor Cyan
     
+    Write-SetupLog "Riepilogo: $($SummaryLog -join '; ')"
     Write-Host "Configurazione completata!" -ForegroundColor Green
 
 }
 catch {
+    Write-SetupErrorDetails $_
     Write-Error "Si è verificato un errore durante l'esecuzione dello script: $_"
 }
 finally {
@@ -678,12 +828,24 @@ finally {
         Read-Host "`nPremi Invio per uscire..."
     }
     finally {
+        if (-not [string]::IsNullOrWhiteSpace($LogPath) -and (Test-Path -LiteralPath $LogPath)) {
+            $runDuration = (Get-Date) - $RunStartedAt
+            Write-SetupLog "Fine esecuzione: $(Get-Date -Format o); durata: $runDuration"
+        }
         if ($TranscriptStarted) {
             try {
                 Stop-Transcript | Out-Null
             }
             catch {
                 Write-Warning "Impossibile chiudere correttamente il file di log: $($_.Exception.Message)"
+            }
+            try {
+                Add-Content -LiteralPath $LogPath -Value "`r`n=== Trascrizione output console ===" -Encoding UTF8 -ErrorAction Stop
+                Get-Content -LiteralPath $TranscriptPath -Raw -ErrorAction Stop | Add-Content -LiteralPath $LogPath -Encoding UTF8 -ErrorAction Stop
+                Remove-Item -LiteralPath $TranscriptPath -Force -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Impossibile unire la trascrizione al log dettagliato; la trascrizione è disponibile in $TranscriptPath. Errore: $($_.Exception.Message)"
             }
         }
     }
