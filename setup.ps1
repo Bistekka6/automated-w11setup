@@ -68,7 +68,7 @@ try {
     }
 
     # Registra l'output completo della sessione per consentire la verifica dell'esecuzione.
-    $LogDir = Join-Path $ScriptDir "logs"
+    $LogDir = Join-Path $env:LOCALAPPDATA "WindowsSetup\Logs"
     if (-not (Test-Path $LogDir)) {
         New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
     }
