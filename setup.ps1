@@ -28,6 +28,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 $ErrorActionPreference = "Stop"
 $SummaryLog = @()
+$TranscriptStarted = $false
 
 try {
     # --- 1. Verifica Amministratore ---
@@ -65,6 +66,17 @@ try {
         if (-not (Test-Path $ScriptDir)) { New-Item -ItemType Directory -Path $ScriptDir | Out-Null }
         Write-Host " - Esecuzione remota rilevata. Cartella di lavoro: $ScriptDir" -ForegroundColor Gray
     }
+
+    # Registra l'output completo della sessione per consentire la verifica dell'esecuzione.
+    $LogDir = Join-Path $ScriptDir "logs"
+    if (-not (Test-Path $LogDir)) {
+        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    }
+    $LogTimestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $LogPath = Join-Path $LogDir "setup-$LogTimestamp-$PID.log"
+    Start-Transcript -Path $LogPath -ErrorAction Stop | Out-Null
+    $TranscriptStarted = $true
+    Write-Host "File di log dell'esecuzione: $LogPath" -ForegroundColor Gray
 
     # --- Menu Interattivo ---
     if (-not $Unattended) {
@@ -662,5 +674,17 @@ catch {
     Write-Error "Si è verificato un errore durante l'esecuzione dello script: $_"
 }
 finally {
-    Read-Host "`nPremi Invio per uscire..."
+    try {
+        Read-Host "`nPremi Invio per uscire..."
+    }
+    finally {
+        if ($TranscriptStarted) {
+            try {
+                Stop-Transcript | Out-Null
+            }
+            catch {
+                Write-Warning "Impossibile chiudere correttamente il file di log: $($_.Exception.Message)"
+            }
+        }
+    }
 }
