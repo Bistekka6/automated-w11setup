@@ -7,7 +7,7 @@ Script di configurazione post-installazione per PC Windows 11 e Windows 10, prog
 - Abilitazione ICMPv4 (Ping) nel Firewall.
 - Impostazione informazioni OEM (Produttore, Sito, Telefono).
 - Esecuzione di **Win11Debloat** (ottimizzazione sistema e protezione app Microsoft).
-- Rimozione automatica e silenziosa di McAfee e WebAdvisor tramite i comandi di disinstallazione registrati in Windows, con verifica dei componenti residui.
+- Rimozione di McAfee e WebAdvisor tramite i comandi registrati in Windows: usa la modalità silenziosa se disponibile, altrimenti avvia la procedura interattiva e attende la conclusione. Verifica poi i componenti residui.
 - Installazione app tramite **Winget** (Chrome, Microsoft 365 Apps, Teams, Acrobat) utilizzando la sorgente `winget` (community). Microsoft 365 Apps include Outlook classico; Teams viene installato separatamente tramite Winget. Se l'installazione di Office tramite Winget fallisce, lo script usa `setup.exe` e la configurazione XML inclusi in `installers/office/` e riprova tramite Office Deployment Tool. In esecuzione remota, scarica i file da questo repository.
 - Rilevamento hardware Dell/Lenovo per installazione utility specifiche.
 - Installazione delle dipendenze Winget richieste da Dell Command Update e riepilogo esplicito delle app non installate.

@@ -461,7 +461,17 @@ public class Wallpaper {
                         }
 
                         $productCode = $Matches[0]
-                        $uninstallProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList "/x $productCode /qn /norestart" -Wait -PassThru -NoNewWindow -ErrorAction Stop
+                        $msiArguments = "/x $productCode"
+                        $msiHasSilentSwitch = $hasQuietUninstallCommand -or $uninstallCommand -match '(?i)(?:^|\s)(?:/|-)(?:s|silent|quiet|qn|verysilent)(?:\s|$)'
+                        if ($msiHasSilentSwitch) {
+                            $msiArguments = "$msiArguments /qn /norestart"
+                            Write-SetupLog "Disinstallazione MSI di $($app.Name) in modalità silenziosa"
+                        }
+                        else {
+                            Write-Host " - Avvio della procedura interattiva per $($app.Name)..." -ForegroundColor Yellow
+                            Write-SetupLog "Disinstallazione MSI di $($app.Name) in modalità interattiva"
+                        }
+                        $uninstallProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArguments -Wait -PassThru -NoNewWindow -ErrorAction Stop
                     }
                     else {
                         if ($uninstallCommand -match '^\s*"([^"]+)"\s*(.*)$') {
@@ -489,9 +499,8 @@ public class Wallpaper {
                             }
 
                             if (-not $hasSilentSwitch) {
-                                Write-Warning " - Disinstallazione di $($app.Name) saltata: nessun comando silenzioso riconosciuto; evito di aprire una procedura interattiva."
-                                Write-SetupLog "Disinstallazione di $($app.Name) saltata: nessun comando silenzioso riconosciuto" "WARN"
-                                continue
+                                Write-Host " - Nessun parametro silenzioso disponibile; avvio la procedura interattiva per $($app.Name)." -ForegroundColor Yellow
+                                Write-SetupLog "Disinstallazione di $($app.Name) in modalità interattiva: nessun parametro silenzioso riconosciuto"
                             }
                         }
 
