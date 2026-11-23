@@ -10,10 +10,11 @@ Script di configurazione post-installazione per PC Windows 11 e Windows 10, prog
 - Rimozione automatica e silenziosa di McAfee e WebAdvisor tramite i comandi di disinstallazione registrati in Windows, con verifica dei componenti residui.
 - Installazione app tramite **Winget** (Chrome, Microsoft 365 Apps, Teams, Acrobat) utilizzando la sorgente `winget` (community). Microsoft 365 Apps include Outlook classico; Teams viene installato separatamente tramite Winget. Se l'installazione di Office tramite Winget fallisce, lo script usa `setup.exe` e la configurazione XML inclusi in `installers/office/` e riprova tramite Office Deployment Tool. In esecuzione remota, scarica i file da questo repository.
 - Rilevamento hardware Dell/Lenovo per installazione utility specifiche.
+- Installazione delle dipendenze Winget richieste da Dell Command Update e riepilogo esplicito delle app non installate.
 - Installazione app locali da cartella `installers/`.
 - Download e installazione automatica di **WatchGuard Mobile VPN**.
 - Configurazione Taskbar.
-- Avvio aggiornamenti Windows e controllo BitLocker.
+- Avvio aggiornamenti Windows e controllo BitLocker, distinguendo il disco crittografato dalla protezione attiva.
 - Registrazione dettagliata in `%LOCALAPPDATA%\WindowsSetup\Logs\setup-<data>-<processo>.log`: include diagnostica dell'ambiente, operazioni e verifiche effettuate, output standard/errore e codici di uscita dei processi Winget e Office, dettagli completi degli errori, oltre alla trascrizione della sessione. Il log viene arricchito con informazioni operative non mostrate a video e il suo percorso viene indicato all'avvio.
 
 ## Esecuzione Rapida

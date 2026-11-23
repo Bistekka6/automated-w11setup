@@ -55,12 +55,29 @@ function Start-SetupProcess {
     try {
         Write-SetupLog "Avvio processo ${Label}: $FilePath $ArgumentList"
         $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -ErrorAction Stop
-        $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
-        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
+        $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw -Encoding UTF8 } else { "" }
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw -Encoding UTF8 } else { "" }
         Write-SetupLog "Processo $Label ($FilePath): PID $($process.Id), codice uscita $($process.ExitCode)"
         if (-not [string]::IsNullOrWhiteSpace($stdout)) { Write-SetupLog "stdout $Label`:`n$stdout" }
         if (-not [string]::IsNullOrWhiteSpace($stderr)) { Write-SetupLog "stderr $Label`:`n$stderr" "WARN" }
-        return $process
+        foreach ($line in ($stdout -split "\r?\n")) {
+            if ($line -match '(?im)(?:disponibile in|available in|available at):\s*[''"](?<path>[^''"]+)[''"]') {
+                $installerLogPath = $Matches.path
+                if (Test-Path -LiteralPath $installerLogPath) {
+                    $installerLog = Get-Content -LiteralPath $installerLogPath -Raw
+                    Write-SetupLog "Log dettagliato del programma di installazione ($installerLogPath):`n$installerLog" "WARN"
+                }
+                else {
+                    Write-SetupLog "Log dettagliato del programma di installazione non trovato: $installerLogPath" "WARN"
+                }
+            }
+        }
+        return [PSCustomObject]@{
+            Id       = $process.Id
+            ExitCode = $process.ExitCode
+            StdOut   = $stdout
+            StdErr   = $stderr
+        }
     }
     finally {
         foreach ($tempPath in @($stdoutPath, $stderrPath)) {
@@ -145,7 +162,13 @@ try {
     Write-SetupLog "Utente: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
     Write-SetupLog "PowerShell: $($PSVersionTable.PSVersion)"
     Write-SetupLog "Sistema operativo: $([Environment]::OSVersion.VersionString)"
-    Write-SetupLog "Script: $PSCommandPath"
+    if ($PSCommandPath) {
+        Write-SetupLog "Script: $PSCommandPath"
+    }
+    else {
+        Write-SetupLog "Script: esecuzione remota via Invoke-Expression"
+    }
+    Write-SetupLog "Cartella dello script: $ScriptDir"
     Write-SetupLog "Directory di lavoro: $(Get-Location)"
     Start-Transcript -Path $TranscriptPath -ErrorAction Stop | Out-Null
     $TranscriptStarted = $true
@@ -425,6 +448,7 @@ public class Wallpaper {
                 }
                 if ([string]::IsNullOrWhiteSpace($uninstallCommand)) {
                     Write-Warning " - Nessun comando di disinstallazione registrato per $($app.Name)."
+                    Write-SetupLog "Disinstallazione di $($app.Name) saltata: comando di disinstallazione assente" "WARN"
                     continue
                 }
 
@@ -465,7 +489,9 @@ public class Wallpaper {
                             }
 
                             if (-not $hasSilentSwitch) {
-                                throw "Nessun comando di disinstallazione silenziosa disponibile per $($app.Name); evito di aprire la procedura interattiva."
+                                Write-Warning " - Disinstallazione di $($app.Name) saltata: nessun comando silenzioso riconosciuto; evito di aprire una procedura interattiva."
+                                Write-SetupLog "Disinstallazione di $($app.Name) saltata: nessun comando silenzioso riconosciuto" "WARN"
+                                continue
                             }
                         }
 
@@ -529,16 +555,19 @@ public class Wallpaper {
             # --- Self-healing per le sorgenti Winget ---
             try {
                 Write-Host " - Verifica e aggiornamento sorgenti Winget..." -ForegroundColor Gray
-                $sourceUpdateOutput = winget source update 2>&1 | Out-String
-                $sourceUpdateExitCode = $LASTEXITCODE
+                $sourceUpdateResult = Start-SetupProcess -FilePath "winget" -ArgumentList "source update" -Label "winget source update"
+                $sourceUpdateOutput = "$($sourceUpdateResult.StdOut)`r`n$($sourceUpdateResult.StdErr)"
+                $sourceUpdateExitCode = $sourceUpdateResult.ExitCode
                 Write-SetupLog "winget source update: codice $sourceUpdateExitCode; output: $sourceUpdateOutput"
                 if ($sourceUpdateExitCode -ne 0 -or $sourceUpdateOutput -match "0x8a15005e") {
                     Write-Warning " - Rilevato errore sorgenti Winget (es. certificato scaduto o metadati corrotti). Tentativo di ripristino automatico..."
-                    $sourceResetOutput = winget source reset --force 2>&1 | Out-String
-                    $sourceResetExitCode = $LASTEXITCODE
+                    $sourceResetResult = Start-SetupProcess -FilePath "winget" -ArgumentList "source reset --force" -Label "winget source reset"
+                    $sourceResetOutput = "$($sourceResetResult.StdOut)`r`n$($sourceResetResult.StdErr)"
+                    $sourceResetExitCode = $sourceResetResult.ExitCode
                     Write-SetupLog "winget source reset --force: codice $sourceResetExitCode; output: $sourceResetOutput"
-                    $sourceRetryOutput = winget source update 2>&1 | Out-String
-                    $sourceRetryExitCode = $LASTEXITCODE
+                    $sourceRetryResult = Start-SetupProcess -FilePath "winget" -ArgumentList "source update" -Label "winget source update dopo reset"
+                    $sourceRetryOutput = "$($sourceRetryResult.StdOut)`r`n$($sourceRetryResult.StdErr)"
+                    $sourceRetryExitCode = $sourceRetryResult.ExitCode
                     Write-SetupLog "winget source update dopo reset: codice $sourceRetryExitCode; output: $sourceRetryOutput"
                 }
             }
@@ -563,11 +592,13 @@ public class Wallpaper {
                 $apps += @{ id = "Lenovo.Vantage"; name = "Lenovo Vantage" }
             }
 
+            $wingetFailures = @()
             foreach ($app in $apps) {
                 $isInstalled = $false
                 try {
-                    $wingetListOutput = winget list --id $($app.id) --exact --source winget 2>&1 | Out-String
-                    $wingetListExitCode = $LASTEXITCODE
+                    $wingetListResult = Start-SetupProcess -FilePath "winget" -ArgumentList "list --id $($app.id) --exact --source winget" -Label "winget list $($app.id)"
+                    $wingetListOutput = "$($wingetListResult.StdOut)`r`n$($wingetListResult.StdErr)"
+                    $wingetListExitCode = $wingetListResult.ExitCode
                     Write-SetupLog "winget list --id $($app.id): codice $wingetListExitCode; output: $wingetListOutput"
                     $isInstalled = $wingetListExitCode -eq 0
                 }
@@ -576,7 +607,8 @@ public class Wallpaper {
                     Write-SetupErrorDetails $_
                 }
 
-                $installSucceeded = $false
+                $installSucceeded = $isInstalled
+                $appFailureMessages = @()
                 if ($isInstalled) {
                     Write-SetupLog "$($app.id) già presente secondo winget list"
                     Write-Host " - $($app.name) già installato. Verifica aggiornamenti..." -ForegroundColor Gray
@@ -584,14 +616,39 @@ public class Wallpaper {
                 else {
                     Write-Host " - Installazione di $($app.name)..." -ForegroundColor Gray
                     try {
+                        if ($app.id -eq "Dell.CommandUpdate") {
+                            $runtimeId = "Microsoft.DotNet.DesktopRuntime.8"
+                            $runtimeListResult = Start-SetupProcess -FilePath "winget" -ArgumentList "list --id $runtimeId --exact --source winget" -Label "winget list $runtimeId"
+                            $runtimeListOutput = "$($runtimeListResult.StdOut)`r`n$($runtimeListResult.StdErr)"
+                            $runtimeListExitCode = $runtimeListResult.ExitCode
+                            Write-SetupLog "Prerequisito ${runtimeId}: winget list codice $runtimeListExitCode; output: $runtimeListOutput"
+                            if ($runtimeListExitCode -ne 0) {
+                                Write-SetupLog "Installazione preventiva del prerequisito $runtimeId dichiarato da Dell.CommandUpdate"
+                                try {
+                                    $runtimeProcess = Start-SetupProcess -FilePath "winget" -ArgumentList "install --id $runtimeId --exact --silent --accept-package-agreements --accept-source-agreements --source winget" -Label "winget install $runtimeId"
+                                    if ($runtimeProcess.ExitCode -ne 0) {
+                                        $appFailureMessages += "$runtimeId non installato (codice $($runtimeProcess.ExitCode))"
+                                        Write-Warning " - Installazione del prerequisito $runtimeId non riuscita (codice $($runtimeProcess.ExitCode))."
+                                    }
+                                }
+                                catch {
+                                    $appFailureMessages += "${runtimeId}: $($_.Exception.Message)"
+                                    Write-Warning " - Errore installazione del prerequisito $runtimeId`: $($_.Exception.Message)"
+                                    Write-SetupErrorDetails $_
+                                }
+                            }
+                        }
+
                         Write-SetupLog "Avvio installazione Winget $($app.id)"
                         $installProcess = Start-SetupProcess -FilePath "winget" -ArgumentList "install --id $($app.id) --silent --accept-package-agreements --accept-source-agreements --source winget" -Label "winget install $($app.id)"
                         $installSucceeded = $installProcess.ExitCode -eq 0
                         if (-not $installSucceeded) {
+                            $appFailureMessages += "codice uscita $($installProcess.ExitCode)"
                             Write-Warning " - Installazione Winget di $($app.name) non riuscita (codice $($installProcess.ExitCode))."
                         }
                     }
                     catch {
+                        $appFailureMessages += $_.Exception.Message
                         Write-Warning " - Errore installazione Winget di $($app.name): $($_.Exception.Message)"
                         Write-SetupErrorDetails $_
                     }
@@ -634,9 +691,11 @@ public class Wallpaper {
                         }
 
                         $officeFallbackSucceeded = $true
+                        $installSucceeded = $true
                         Write-Host " - Office installato tramite setup.exe." -ForegroundColor Green
                     }
                     catch {
+                        $appFailureMessages += "fallback Office: $($_.Exception.Message)"
                         Write-Warning " - Installazione di Office tramite setup.exe non riuscita: $($_.Exception.Message)"
                         Write-SetupErrorDetails $_
                     }
@@ -648,12 +707,27 @@ public class Wallpaper {
                         $SummaryLog += "[!] Installazione Office non riuscita né con Winget né con setup.exe"
                     }
                 }
+
+                if (-not ($isInstalled -or $installSucceeded)) {
+                    if ($appFailureMessages.Count -eq 0) {
+                        $appFailureMessages += "installazione non riuscita"
+                    }
+                    $failureSummary = "$($app.name): $($appFailureMessages -join '; ')"
+                    $wingetFailures += $failureSummary
+                    Write-SetupLog $failureSummary "WARN"
+                }
             }
-            $SummaryLog += "[-] Applicazioni Winget verificate"
+            if ($wingetFailures.Count -eq 0) {
+                $SummaryLog += "[-] Applicazioni Winget verificate"
+            }
+            else {
+                $SummaryLog += "[!] Installazione Winget incompleta: $($wingetFailures -join ', ')"
+            }
         }
         catch {
             Write-Warning " - Errore Winget: $($_.Exception.Message)"
             Write-SetupErrorDetails $_
+            $SummaryLog += "[!] Errore durante la fase Winget: $($_.Exception.Message)"
         }
     }
 
@@ -786,9 +860,17 @@ public class Wallpaper {
                 Write-Host " - BitLocker è DISATTIVATO sul disco principale." -ForegroundColor Yellow
                 $SummaryLog += "[-] Stato BitLocker: DISATTIVATO"
             }
-            elseif ($bl.VolumeStatus -eq "FullyEncrypted") {
+            elseif ($bl.VolumeStatus -eq "FullyEncrypted" -and $bl.ProtectionStatus -eq "On") {
                 Write-Host " - BitLocker è ATTIVO sul disco principale." -ForegroundColor Green
                 $SummaryLog += "[-] Stato BitLocker: ATTIVO"
+            }
+            elseif ($bl.VolumeStatus -eq "FullyEncrypted" -and $bl.ProtectionStatus -eq "Off") {
+                Write-Host " - Il disco è crittografato, ma la protezione BitLocker è disattivata o sospesa." -ForegroundColor Yellow
+                $SummaryLog += "[!] Disco crittografato, ma protezione BitLocker disattivata/sospesa"
+            }
+            elseif ($bl.VolumeStatus -eq "FullyEncrypted") {
+                Write-Host " - Il disco è crittografato; stato protezione BitLocker: $($bl.ProtectionStatus)." -ForegroundColor Yellow
+                $SummaryLog += "[!] Disco crittografato; stato protezione BitLocker: $($bl.ProtectionStatus)"
             }
             else {
                 Write-Host " - Stato BitLocker: $($bl.VolumeStatus)"
